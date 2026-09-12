@@ -47,13 +47,13 @@ describeDatabase("provider catalog and tenant selection", () => {
         is_enabled: false,
         availability: "UNAVAILABLE",
       })
-      .whereIn("provider_code", ["PAYSTACK", "WEMA"]);
+      .whereIn("provider_code", ["PAYSTACK", "WEMA", "BANKONE"]);
     await database("provider_catalog")
       .update({
         is_enabled: false,
         availability: "UNAVAILABLE",
       })
-      .whereIn("provider_code", ["PAYSTACK", "WEMA"]);
+      .whereIn("provider_code", ["PAYSTACK", "WEMA", "BANKONE"]);
   });
 
   afterAll(async () => {
@@ -144,6 +144,37 @@ describeDatabase("provider catalog and tenant selection", () => {
         correlationId: randomUUID(),
       }),
     ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
+  });
+
+  it("registers BankOne capabilities as disabled and unavailable by default", async () => {
+    await expect(
+      database("provider_capabilities")
+        .where({ provider_code: "BANKONE", currency: "NGN" })
+        .orderBy("capability")
+        .select("capability", "is_enabled", "availability"),
+    ).resolves.toEqual([
+      {
+        capability: "COLLECTION",
+        is_enabled: false,
+        availability: "UNAVAILABLE",
+      },
+      {
+        capability: "INTERBANK_TRANSFER",
+        is_enabled: false,
+        availability: "UNAVAILABLE",
+      },
+      {
+        capability: "VIRTUAL_ACCOUNT",
+        is_enabled: false,
+        availability: "UNAVAILABLE",
+      },
+    ]);
+  });
+
+  it("recognizes bill payments but lists no provider until one is integrated and activated", async () => {
+    await expect(
+      selections.listAvailable("BILL_PAYMENT", "NGN"),
+    ).resolves.toEqual([]);
   });
 
   it("uses a consumed exact approval, versions the selection, and publishes the change", async () => {

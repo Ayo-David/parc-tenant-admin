@@ -7,7 +7,7 @@ const snapshotUrl = new URL("../schema/current.sql", import.meta.url);
 const approvedExistingBaselineHash =
   "f43e534250c7ca3704fe45b2ff9397ef1d3bb6dbe3e86b3167e6544dee3d03eb";
 const canonicalSnapshotHash =
-  "853f387d94acb81da57a12dc835d43a411fceedd9fc11021dd57992243251180";
+  "482462e033bc87ac70cb6b433659226d30d85feef81327043df64f2ee126f340";
 
 export const config = { transaction: false };
 

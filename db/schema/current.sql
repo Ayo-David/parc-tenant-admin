@@ -2077,6 +2077,32 @@ ALTER TABLE ONLY public.inbox_events FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: knex_migrations_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.knex_migrations_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: knex_migrations_lock_index_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.knex_migrations_lock_index_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
 -- Name: operation_actions; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2749,9 +2775,9 @@ CREATE TABLE public.provider_capabilities (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    CONSTRAINT chk_provider_capability_currency CHECK (((((capability)::text = ANY ((ARRAY['VIRTUAL_ACCOUNT'::character varying, 'COLLECTION'::character varying, 'INTERBANK_TRANSFER'::character varying, 'DIRECT_DEBIT'::character varying])::text[])) AND (currency ~ '^[A-Z]{3}$'::text)) OR (((capability)::text = ANY ((ARRAY['KYC'::character varying, 'EMAIL'::character varying, 'SMS'::character varying, 'PUSH_NOTIFICATION'::character varying])::text[])) AND (currency IS NULL)))),
+    CONSTRAINT chk_provider_capability_currency CHECK (((((capability)::text = ANY ((ARRAY['VIRTUAL_ACCOUNT'::character varying, 'COLLECTION'::character varying, 'INTERBANK_TRANSFER'::character varying, 'DIRECT_DEBIT'::character varying, 'BILL_PAYMENT'::character varying])::text[])) AND (currency ~ '^[A-Z]{3}$'::text)) OR (((capability)::text = ANY ((ARRAY['KYC'::character varying, 'EMAIL'::character varying, 'SMS'::character varying, 'PUSH_NOTIFICATION'::character varying])::text[])) AND (currency IS NULL)))),
     CONSTRAINT provider_capabilities_availability_check CHECK (((availability)::text = ANY ((ARRAY['AVAILABLE'::character varying, 'DEGRADED'::character varying, 'UNAVAILABLE'::character varying])::text[]))),
-    CONSTRAINT provider_capabilities_capability_check CHECK (((capability)::text = ANY ((ARRAY['VIRTUAL_ACCOUNT'::character varying, 'COLLECTION'::character varying, 'INTERBANK_TRANSFER'::character varying, 'DIRECT_DEBIT'::character varying, 'KYC'::character varying, 'EMAIL'::character varying, 'SMS'::character varying, 'PUSH_NOTIFICATION'::character varying])::text[])))
+    CONSTRAINT provider_capabilities_capability_check CHECK (((capability)::text = ANY ((ARRAY['VIRTUAL_ACCOUNT'::character varying, 'COLLECTION'::character varying, 'INTERBANK_TRANSFER'::character varying, 'DIRECT_DEBIT'::character varying, 'BILL_PAYMENT'::character varying, 'KYC'::character varying, 'EMAIL'::character varying, 'SMS'::character varying, 'PUSH_NOTIFICATION'::character varying])::text[])))
 );
 
 
@@ -3335,7 +3361,7 @@ CREATE TABLE public.tenant_provider_selections (
     reason text NOT NULL,
     selected_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT chk_tenant_selection_currency CHECK (((((capability)::text = ANY ((ARRAY['VIRTUAL_ACCOUNT'::character varying, 'COLLECTION'::character varying, 'INTERBANK_TRANSFER'::character varying, 'DIRECT_DEBIT'::character varying])::text[])) AND (currency ~ '^[A-Z]{3}$'::text)) OR (((capability)::text = ANY ((ARRAY['KYC'::character varying, 'EMAIL'::character varying, 'SMS'::character varying, 'PUSH_NOTIFICATION'::character varying])::text[])) AND (currency IS NULL)))),
+    CONSTRAINT chk_tenant_selection_currency CHECK (((((capability)::text = ANY ((ARRAY['VIRTUAL_ACCOUNT'::character varying, 'COLLECTION'::character varying, 'INTERBANK_TRANSFER'::character varying, 'DIRECT_DEBIT'::character varying, 'BILL_PAYMENT'::character varying])::text[])) AND (currency ~ '^[A-Z]{3}$'::text)) OR (((capability)::text = ANY ((ARRAY['KYC'::character varying, 'EMAIL'::character varying, 'SMS'::character varying, 'PUSH_NOTIFICATION'::character varying])::text[])) AND (currency IS NULL)))),
     CONSTRAINT tenant_provider_selections_version_check CHECK ((version > 0))
 );
 
@@ -10936,6 +10962,24 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.inbox_events TO parc_tenant_ad
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.inbox_events TO parc_tenant_admin_platform;
 GRANT SELECT,INSERT,UPDATE ON TABLE public.inbox_events TO parc_tenant_admin_worker;
 GRANT SELECT ON TABLE public.inbox_events TO parc_tenant_admin_readonly;
+
+
+--
+-- Name: SEQUENCE knex_migrations_id_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,USAGE ON SEQUENCE public.knex_migrations_id_seq TO parc_tenant_admin_runtime;
+GRANT SELECT,USAGE ON SEQUENCE public.knex_migrations_id_seq TO parc_tenant_admin_platform;
+GRANT SELECT,USAGE ON SEQUENCE public.knex_migrations_id_seq TO parc_tenant_admin_worker;
+
+
+--
+-- Name: SEQUENCE knex_migrations_lock_index_seq; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,USAGE ON SEQUENCE public.knex_migrations_lock_index_seq TO parc_tenant_admin_runtime;
+GRANT SELECT,USAGE ON SEQUENCE public.knex_migrations_lock_index_seq TO parc_tenant_admin_platform;
+GRANT SELECT,USAGE ON SEQUENCE public.knex_migrations_lock_index_seq TO parc_tenant_admin_worker;
 
 
 --

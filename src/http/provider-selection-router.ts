@@ -11,6 +11,7 @@ const capability = z.enum([
   "COLLECTION",
   "INTERBANK_TRANSFER",
   "DIRECT_DEBIT",
+  "BILL_PAYMENT",
   "KYC",
   "EMAIL",
   "SMS",
@@ -175,6 +176,7 @@ function assertCurrency(
     "COLLECTION",
     "INTERBANK_TRANSFER",
     "DIRECT_DEBIT",
+    "BILL_PAYMENT",
   ].includes(value);
   if (financial !== (currency !== null))
     throw new ApiError(
