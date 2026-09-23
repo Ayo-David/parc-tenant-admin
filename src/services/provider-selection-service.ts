@@ -25,9 +25,9 @@ interface SelectionRow {
   currency: string | null;
   provider_code: string;
   version: number;
-  approval_id: string;
-  selected_by: string;
-  reason: string;
+  approval_id: string | null;
+  selected_by: string | null;
+  reason: string | null;
   selected_at: Date;
 }
 
@@ -251,13 +251,47 @@ export class ProviderSelectionService {
         .whereIn("p.availability", ["AVAILABLE", "DEGRADED"])
         .whereIn("c.availability", ["AVAILABLE", "DEGRADED"])
         .first<SelectionRow>("s.*");
-      if (row === undefined)
+      if (row !== undefined) return selectionView(row, "TENANT_OVERRIDE");
+      const fallback = await transaction("provider_defaults as d")
+        .join("provider_catalog as p", "p.provider_code", "d.provider_code")
+        .join("provider_capabilities as c", function () {
+          this.on("c.provider_code", "d.provider_code")
+            .andOn("c.capability", "d.capability")
+            .andOnVal("c.currency", currency);
+        })
+        .where({
+          "d.capability": capability,
+          "p.is_enabled": true,
+          "c.is_enabled": true,
+        })
+        .whereRaw("d.currency IS NOT DISTINCT FROM ?", [currency])
+        .whereIn("p.availability", ["AVAILABLE", "DEGRADED"])
+        .whereIn("c.availability", ["AVAILABLE", "DEGRADED"])
+        .first<{
+          id: string;
+          capability: string;
+          currency: string | null;
+          provider_code: string;
+          version: number;
+          created_at: Date;
+        }>("d.*");
+      if (fallback === undefined)
         throw new ApiError(
           404,
           "PROVIDER_SELECTION_NOT_FOUND",
-          "No available provider selection exists",
+          "No available provider selection or platform default exists",
         );
-      return selectionView(row);
+      return {
+        id: fallback.id,
+        tenant_id: tenantId,
+        capability: fallback.capability,
+        currency: fallback.currency,
+        provider: fallback.provider_code,
+        version: fallback.version,
+        approval_id: null,
+        selected_at: fallback.created_at.toISOString(),
+        source: "PLATFORM_DEFAULT",
+      };
     });
   }
 
@@ -385,10 +419,14 @@ export interface SelectionView {
   currency: string | null;
   provider: string;
   version: number;
-  approval_id: string;
+  approval_id: string | null;
   selected_at: string;
+  source: "PLATFORM_DEFAULT" | "TENANT_OVERRIDE";
 }
-function selectionView(row: SelectionRow): SelectionView {
+function selectionView(
+  row: SelectionRow,
+  source: SelectionView["source"] = "TENANT_OVERRIDE",
+): SelectionView {
   return {
     id: row.id,
     tenant_id: row.tenant_id,
@@ -398,6 +436,7 @@ function selectionView(row: SelectionRow): SelectionView {
     version: row.version,
     approval_id: row.approval_id,
     selected_at: row.selected_at.toISOString(),
+    source,
   };
 }
 function hash(value: unknown): string {

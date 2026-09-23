@@ -20,6 +20,14 @@ import { createProviderSelectionRouter } from "./http/provider-selection-router.
 import type { ProviderSelectionService } from "./services/provider-selection-service.js";
 import { createConfigurationRouter } from "./http/configuration-router.js";
 import type { ConfigurationService } from "./services/configuration-service.js";
+import { createMobileBootstrapRouter } from "./http/mobile-bootstrap-router.js";
+import type { MobileBootstrapService } from "./services/mobile-bootstrap-service.js";
+import { createCustomerSupportRouter } from "./http/customer-support-router.js";
+import type { CustomerSupportService } from "./services/customer-support-service.js";
+import { createOnboardingReferenceDataRouter } from "./http/onboarding-reference-data-router.js";
+import type { OnboardingReferenceDataService } from "./services/onboarding-reference-data-service.js";
+import { createConsentDocumentRouter } from "./http/consent-document-router.js";
+import type { ConsentDocumentService } from "./services/consent-document-service.js";
 
 export function createApp(input: {
   config: AppConfig;
@@ -50,6 +58,26 @@ export function createApp(input: {
     authorizer: AdministratorAuthorizer;
     serviceToken: string;
     allowedServices: ReadonlySet<string>;
+  };
+  mobileBootstrap?: {
+    service: MobileBootstrapService;
+    serviceToken: string;
+    allowedServices: ReadonlySet<string>;
+  };
+  customerSupport?: {
+    service: CustomerSupportService;
+    serviceToken: string;
+    allowedServices: ReadonlySet<string>;
+  };
+  onboardingReferenceData?: {
+    service: OnboardingReferenceDataService;
+    serviceToken: string;
+    allowedServices: ReadonlySet<string>;
+  };
+  consentDocuments?: {
+    service: ConsentDocumentService;
+    authorizer: AdministratorAuthorizer;
+    serviceToken: string;
   };
 }): Express {
   const app = express();
@@ -94,6 +122,14 @@ export function createApp(input: {
     app.use(createProviderSelectionRouter(input.providerSelection));
   if (input.configuration !== undefined)
     app.use(createConfigurationRouter(input.configuration));
+  if (input.mobileBootstrap !== undefined)
+    app.use(createMobileBootstrapRouter(input.mobileBootstrap));
+  if (input.customerSupport !== undefined)
+    app.use(createCustomerSupportRouter(input.customerSupport));
+  if (input.onboardingReferenceData !== undefined)
+    app.use(createOnboardingReferenceDataRouter(input.onboardingReferenceData));
+  if (input.consentDocuments !== undefined)
+    app.use(createConsentDocumentRouter(input.consentDocuments));
   app.use((_request, response) => {
     response
       .status(404)

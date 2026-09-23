@@ -84,6 +84,33 @@ export class TenantLifecycleService {
         contact_person_email: input.application.contactEmail,
         contact_person_phone: input.application.contactPhone,
       });
+      const standardConsents = [
+        ["TERMS_AND_CONDITIONS", "Terms and Conditions", true, 10],
+        ["PRIVACY_POLICY", "Privacy Policy", true, 20],
+        ["DATA_PROCESSING", "Data Processing Consent", true, 30],
+        ["KYC", "KYC and Identity Verification Consent", true, 40],
+      ] as const;
+      for (const [
+        consentType,
+        title,
+        required,
+        sortOrder,
+      ] of standardConsents) {
+        const policyUri = `https://legal.parc.invalid/${tenant.id}/${consentType.toLowerCase().replaceAll("_", "-")}/v1`;
+        await transaction("tenant_consent_documents").insert({
+          tenant_id: tenant.id,
+          consent_type: consentType,
+          document_version: "1.0",
+          title,
+          purpose: `${title} required for customer onboarding`,
+          channel: "MOBILE",
+          policy_uri: policyUri,
+          evidence_digest: createHash("sha256").update(policyUri).digest("hex"),
+          required_at_registration: required,
+          sort_order: sortOrder,
+          created_by: input.requestedBy ?? null,
+        });
+      }
       await transaction("tenant_status_history").insert({
         tenant_id: tenant.id,
         previous_status: null,

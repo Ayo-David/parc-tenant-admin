@@ -145,6 +145,8 @@ export function createConfigurationRouter(input: {
               ? {}
               : { approvalId: body.approval_id }),
             publishedBy: principal.administratorId,
+            publisherScope: principal.scope,
+            publisherTenantId: principal.tenantId,
             idempotencyKey: idempotency(req),
             correlationId: correlation(req),
             expectedVersion: body.expected_version,

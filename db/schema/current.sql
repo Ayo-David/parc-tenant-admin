@@ -696,6 +696,24 @@ CREATE FUNCTION public.protect_published_configuration() RETURNS trigger
 
 
 --
+-- Name: protect_published_support_faq(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.protect_published_support_faq() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    BEGIN
+      IF OLD.status IN ('PUBLISHED','RETIRED') AND (
+        TG_OP = 'DELETE' OR NEW.question IS DISTINCT FROM OLD.question OR
+        NEW.answer IS DISTINCT FROM OLD.answer OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id OR
+        NEW.faq_key IS DISTINCT FROM OLD.faq_key OR NEW.version IS DISTINCT FROM OLD.version OR
+        NEW.category_id IS DISTINCT FROM OLD.category_id
+      ) THEN RAISE EXCEPTION 'published support FAQ versions are immutable' USING ERRCODE='55000'; END IF;
+      RETURN COALESCE(NEW, OLD);
+    END $$;
+
+
+--
 -- Name: purge_old_audit_logs(integer); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -1542,9 +1560,9 @@ CREATE TABLE public.configuration_definitions (
     is_active boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT configuration_definitions_approval_policy_check CHECK (((approval_policy)::text = ANY ((ARRAY['NONE'::character varying, 'REQUIRED'::character varying])::text[]))),
-    CONSTRAINT configuration_definitions_classification_check CHECK (((classification)::text = ANY ((ARRAY['OPERATIONAL'::character varying, 'FINANCIAL'::character varying, 'SECURITY'::character varying, 'ACCESS'::character varying, 'PROVIDER'::character varying, 'PRICING'::character varying, 'LIMIT'::character varying, 'RISK'::character varying])::text[]))),
-    CONSTRAINT configuration_definitions_data_type_check CHECK (((data_type)::text = ANY ((ARRAY['BOOLEAN'::character varying, 'INTEGER'::character varying, 'DECIMAL'::character varying, 'STRING'::character varying, 'JSON'::character varying])::text[])))
+    CONSTRAINT configuration_definitions_approval_policy_check CHECK (((approval_policy)::text = ANY (ARRAY[('NONE'::character varying)::text, ('REQUIRED'::character varying)::text]))),
+    CONSTRAINT configuration_definitions_classification_check CHECK (((classification)::text = ANY (ARRAY[('OPERATIONAL'::character varying)::text, ('FINANCIAL'::character varying)::text, ('SECURITY'::character varying)::text, ('ACCESS'::character varying)::text, ('PROVIDER'::character varying)::text, ('PRICING'::character varying)::text, ('LIMIT'::character varying)::text, ('RISK'::character varying)::text]))),
+    CONSTRAINT configuration_definitions_data_type_check CHECK (((data_type)::text = ANY (ARRAY[('BOOLEAN'::character varying)::text, ('INTEGER'::character varying)::text, ('DECIMAL'::character varying)::text, ('STRING'::character varying)::text, ('JSON'::character varying)::text])))
 );
 
 
@@ -1572,8 +1590,8 @@ CREATE TABLE public.configuration_versions (
     CONSTRAINT chk_configuration_period CHECK (((effective_until IS NULL) OR (effective_until > effective_from))),
     CONSTRAINT chk_configuration_publication CHECK (((((status)::text = 'PUBLISHED'::text) AND (published_by IS NOT NULL) AND (published_at IS NOT NULL)) OR ((status)::text <> 'PUBLISHED'::text))),
     CONSTRAINT chk_configuration_scope CHECK (((((scope)::text = 'SYSTEM'::text) AND (tenant_id IS NULL) AND (tier_id IS NULL)) OR (((scope)::text = 'TIER'::text) AND (tenant_id IS NULL) AND (tier_id IS NOT NULL)) OR (((scope)::text = 'TENANT'::text) AND (tenant_id IS NOT NULL) AND (tier_id IS NULL)))),
-    CONSTRAINT configuration_versions_scope_check CHECK (((scope)::text = ANY ((ARRAY['SYSTEM'::character varying, 'TIER'::character varying, 'TENANT'::character varying])::text[]))),
-    CONSTRAINT configuration_versions_status_check CHECK (((status)::text = ANY ((ARRAY['DRAFT'::character varying, 'PUBLISHED'::character varying, 'SUPERSEDED'::character varying, 'RETIRED'::character varying])::text[]))),
+    CONSTRAINT configuration_versions_scope_check CHECK (((scope)::text = ANY (ARRAY[('SYSTEM'::character varying)::text, ('TIER'::character varying)::text, ('TENANT'::character varying)::text]))),
+    CONSTRAINT configuration_versions_status_check CHECK (((status)::text = ANY (ARRAY[('DRAFT'::character varying)::text, ('PUBLISHED'::character varying)::text, ('SUPERSEDED'::character varying)::text, ('RETIRED'::character varying)::text]))),
     CONSTRAINT configuration_versions_version_check CHECK ((version > 0))
 );
 
@@ -2074,32 +2092,6 @@ CREATE TABLE public.inbox_events (
 );
 
 ALTER TABLE ONLY public.inbox_events FORCE ROW LEVEL SECURITY;
-
-
---
--- Name: knex_migrations_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.knex_migrations_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: knex_migrations_lock_index_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.knex_migrations_lock_index_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
 
 
 --
@@ -2776,7 +2768,7 @@ CREATE TABLE public.provider_capabilities (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     CONSTRAINT chk_provider_capability_currency CHECK (((((capability)::text = ANY ((ARRAY['VIRTUAL_ACCOUNT'::character varying, 'COLLECTION'::character varying, 'INTERBANK_TRANSFER'::character varying, 'DIRECT_DEBIT'::character varying, 'BILL_PAYMENT'::character varying])::text[])) AND (currency ~ '^[A-Z]{3}$'::text)) OR (((capability)::text = ANY ((ARRAY['KYC'::character varying, 'EMAIL'::character varying, 'SMS'::character varying, 'PUSH_NOTIFICATION'::character varying])::text[])) AND (currency IS NULL)))),
-    CONSTRAINT provider_capabilities_availability_check CHECK (((availability)::text = ANY ((ARRAY['AVAILABLE'::character varying, 'DEGRADED'::character varying, 'UNAVAILABLE'::character varying])::text[]))),
+    CONSTRAINT provider_capabilities_availability_check CHECK (((availability)::text = ANY (ARRAY[('AVAILABLE'::character varying)::text, ('DEGRADED'::character varying)::text, ('UNAVAILABLE'::character varying)::text]))),
     CONSTRAINT provider_capabilities_capability_check CHECK (((capability)::text = ANY ((ARRAY['VIRTUAL_ACCOUNT'::character varying, 'COLLECTION'::character varying, 'INTERBANK_TRANSFER'::character varying, 'DIRECT_DEBIT'::character varying, 'BILL_PAYMENT'::character varying, 'KYC'::character varying, 'EMAIL'::character varying, 'SMS'::character varying, 'PUSH_NOTIFICATION'::character varying])::text[])))
 );
 
@@ -2799,7 +2791,7 @@ CREATE TABLE public.provider_capability_availability_history (
     changed_by uuid NOT NULL,
     reason text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT provider_capability_availability_history_availability_check CHECK (((availability)::text = ANY ((ARRAY['AVAILABLE'::character varying, 'DEGRADED'::character varying, 'UNAVAILABLE'::character varying])::text[])))
+    CONSTRAINT provider_capability_availability_history_availability_check CHECK (((availability)::text = ANY (ARRAY[('AVAILABLE'::character varying)::text, ('DEGRADED'::character varying)::text, ('UNAVAILABLE'::character varying)::text])))
 );
 
 ALTER TABLE ONLY public.provider_capability_availability_history FORCE ROW LEVEL SECURITY;
@@ -2817,8 +2809,8 @@ CREATE TABLE public.provider_catalog (
     availability character varying(20) DEFAULT 'UNAVAILABLE'::character varying NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT provider_catalog_availability_check CHECK (((availability)::text = ANY ((ARRAY['AVAILABLE'::character varying, 'DEGRADED'::character varying, 'UNAVAILABLE'::character varying])::text[]))),
-    CONSTRAINT provider_catalog_category_check CHECK (((category)::text = ANY ((ARRAY['FINANCIAL'::character varying, 'KYC'::character varying, 'EMAIL'::character varying, 'SMS'::character varying, 'PUSH'::character varying])::text[])))
+    CONSTRAINT provider_catalog_availability_check CHECK (((availability)::text = ANY (ARRAY[('AVAILABLE'::character varying)::text, ('DEGRADED'::character varying)::text, ('UNAVAILABLE'::character varying)::text]))),
+    CONSTRAINT provider_catalog_category_check CHECK (((category)::text = ANY (ARRAY[('FINANCIAL'::character varying)::text, ('KYC'::character varying)::text, ('EMAIL'::character varying)::text, ('SMS'::character varying)::text, ('PUSH'::character varying)::text])))
 );
 
 
@@ -2827,6 +2819,30 @@ CREATE TABLE public.provider_catalog (
 --
 
 COMMENT ON TABLE public.provider_catalog IS 'Platform-owned provider discovery catalog. Contains no provider credentials.';
+
+
+--
+-- Name: provider_defaults; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.provider_defaults (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    capability character varying(40) NOT NULL,
+    currency character(3),
+    provider_code character varying(50) NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT chk_provider_default_currency CHECK (((((capability)::text = ANY ((ARRAY['VIRTUAL_ACCOUNT'::character varying, 'COLLECTION'::character varying, 'INTERBANK_TRANSFER'::character varying, 'DIRECT_DEBIT'::character varying, 'BILL_PAYMENT'::character varying])::text[])) AND (currency ~ '^[A-Z]{3}$'::text)) OR (((capability)::text = ANY ((ARRAY['KYC'::character varying, 'EMAIL'::character varying, 'SMS'::character varying, 'PUSH_NOTIFICATION'::character varying])::text[])) AND (currency IS NULL)))),
+    CONSTRAINT provider_defaults_version_check CHECK ((version > 0))
+);
+
+
+--
+-- Name: TABLE provider_defaults; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.provider_defaults IS 'Platform defaults used only when a tenant has no explicit maker-checker-approved selection.';
 
 
 --
@@ -2995,6 +3011,40 @@ CREATE TABLE public.support_categories (
 );
 
 ALTER TABLE ONLY public.support_categories FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: support_faqs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.support_faqs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    faq_key uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    category_id uuid,
+    question text NOT NULL,
+    answer text NOT NULL,
+    version integer DEFAULT 1 NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    status character varying(20) DEFAULT 'DRAFT'::character varying NOT NULL,
+    effective_from timestamp with time zone,
+    effective_until timestamp with time zone,
+    published_at timestamp with time zone,
+    created_by uuid,
+    updated_by uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    deleted_at timestamp with time zone,
+    CONSTRAINT chk_support_faq_period CHECK (((effective_until IS NULL) OR ((effective_from IS NOT NULL) AND (effective_until > effective_from)))),
+    CONSTRAINT chk_support_faq_publication CHECK ((((status)::text <> 'PUBLISHED'::text) OR ((published_at IS NOT NULL) AND (effective_from IS NOT NULL)))),
+    CONSTRAINT support_faqs_answer_check CHECK (((length(btrim(answer)) >= 1) AND (length(btrim(answer)) <= 10000))),
+    CONSTRAINT support_faqs_question_check CHECK (((length(btrim(question)) >= 1) AND (length(btrim(question)) <= 500))),
+    CONSTRAINT support_faqs_sort_order_check CHECK ((sort_order >= 0)),
+    CONSTRAINT support_faqs_status_check CHECK (((status)::text = ANY ((ARRAY['DRAFT'::character varying, 'PUBLISHED'::character varying, 'RETIRED'::character varying])::text[]))),
+    CONSTRAINT support_faqs_version_check CHECK ((version > 0))
+);
+
+ALTER TABLE ONLY public.support_faqs FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -3383,7 +3433,7 @@ CREATE TABLE public.tenant_revenue_settlement_configuration_history (
     changed_at timestamp with time zone DEFAULT now() NOT NULL,
     reason text,
     CONSTRAINT tenant_revenue_settlement_configuration_hi_version_number_check CHECK ((version_number > 0)),
-    CONSTRAINT tenant_revenue_settlement_configuration_history_action_check CHECK (((action)::text = ANY ((ARRAY['CREATED'::character varying, 'UPDATED'::character varying, 'ACTIVATED'::character varying, 'DEACTIVATED'::character varying, 'EXPIRED'::character varying])::text[])))
+    CONSTRAINT tenant_revenue_settlement_configuration_history_action_check CHECK (((action)::text = ANY (ARRAY[('CREATED'::character varying)::text, ('UPDATED'::character varying)::text, ('ACTIVATED'::character varying)::text, ('DEACTIVATED'::character varying)::text, ('EXPIRED'::character varying)::text])))
 );
 
 ALTER TABLE ONLY public.tenant_revenue_settlement_configuration_history FORCE ROW LEVEL SECURITY;
@@ -3472,7 +3522,7 @@ CREATE TABLE public.tenant_revenue_share_rule_history (
     changed_by uuid,
     changed_at timestamp with time zone DEFAULT now() NOT NULL,
     reason text,
-    CONSTRAINT tenant_revenue_share_rule_history_action_check CHECK (((action)::text = ANY ((ARRAY['CREATED'::character varying, 'UPDATED'::character varying, 'ACTIVATED'::character varying, 'SUSPENDED'::character varying, 'EXPIRED'::character varying, 'TERMINATED'::character varying])::text[]))),
+    CONSTRAINT tenant_revenue_share_rule_history_action_check CHECK (((action)::text = ANY (ARRAY[('CREATED'::character varying)::text, ('UPDATED'::character varying)::text, ('ACTIVATED'::character varying)::text, ('SUSPENDED'::character varying)::text, ('EXPIRED'::character varying)::text, ('TERMINATED'::character varying)::text]))),
     CONSTRAINT tenant_revenue_share_rule_history_version_number_check CHECK ((version_number > 0))
 );
 
@@ -4973,6 +5023,14 @@ ALTER TABLE ONLY public.provider_catalog
 
 
 --
+-- Name: provider_defaults provider_defaults_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.provider_defaults
+    ADD CONSTRAINT provider_defaults_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: reconciliation_actions reconciliation_actions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5034,6 +5092,14 @@ ALTER TABLE ONLY public.security_events
 
 ALTER TABLE ONLY public.support_categories
     ADD CONSTRAINT support_categories_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: support_faqs support_faqs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.support_faqs
+    ADD CONSTRAINT support_faqs_pkey PRIMARY KEY (id);
 
 
 --
@@ -5378,6 +5444,14 @@ ALTER TABLE ONLY public.admin_role_permissions
 
 ALTER TABLE ONLY public.tenant_revenue_settlement_configuration_history
     ADD CONSTRAINT uq_settlement_configuration_history_version UNIQUE (settlement_configuration_id, version_number);
+
+
+--
+-- Name: support_faqs uq_support_faq_version; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.support_faqs
+    ADD CONSTRAINT uq_support_faq_version UNIQUE (tenant_id, faq_key, version);
 
 
 --
@@ -6298,7 +6372,7 @@ CREATE INDEX idx_admin_users_tenant ON public.admin_users USING btree (tenant_id
 -- Name: idx_available_provider_capabilities; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_available_provider_capabilities ON public.provider_capabilities USING btree (capability, currency, provider_code) WHERE (is_enabled AND ((availability)::text = ANY ((ARRAY['AVAILABLE'::character varying, 'DEGRADED'::character varying])::text[])));
+CREATE INDEX idx_available_provider_capabilities ON public.provider_capabilities USING btree (capability, currency, provider_code) WHERE (is_enabled AND ((availability)::text = ANY (ARRAY[('AVAILABLE'::character varying)::text, ('DEGRADED'::character varying)::text])));
 
 
 --
@@ -6530,6 +6604,13 @@ CREATE INDEX idx_security_events_unresolved ON public.security_events USING btre
 --
 
 CREATE INDEX idx_support_events_ticket ON public.support_ticket_events USING btree (ticket_id, created_at);
+
+
+--
+-- Name: idx_support_faq_mobile; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_support_faq_mobile ON public.support_faqs USING btree (tenant_id, sort_order, created_at) WHERE (((status)::text = 'PUBLISHED'::text) AND (deleted_at IS NULL));
 
 
 --
@@ -7181,6 +7262,13 @@ CREATE UNIQUE INDEX uq_operation_consumption_idempotency ON public.operation_req
 --
 
 CREATE UNIQUE INDEX uq_provider_capability_scope ON public.provider_capabilities USING btree (provider_code, capability, COALESCE(currency, '---'::bpchar));
+
+
+--
+-- Name: uq_provider_default_scope; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_provider_default_scope ON public.provider_defaults USING btree (capability, COALESCE(currency, '---'::bpchar));
 
 
 --
@@ -8990,6 +9078,13 @@ CREATE TRIGGER trg_protect_published_configuration BEFORE DELETE OR UPDATE ON pu
 
 
 --
+-- Name: support_faqs trg_protect_published_support_faq; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_protect_published_support_faq BEFORE DELETE OR UPDATE ON public.support_faqs FOR EACH ROW EXECUTE FUNCTION public.protect_published_support_faq();
+
+
+--
 -- Name: reconciliation_exceptions trg_reconciliation_exceptions_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -9514,6 +9609,46 @@ ALTER TABLE ONLY public.provider_capability_availability_history
 
 ALTER TABLE ONLY public.provider_capability_availability_history
     ADD CONSTRAINT provider_capability_availability_history_changed_by_fkey FOREIGN KEY (changed_by) REFERENCES public.admin_users(id);
+
+
+--
+-- Name: provider_defaults provider_defaults_provider_code_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.provider_defaults
+    ADD CONSTRAINT provider_defaults_provider_code_fkey FOREIGN KEY (provider_code) REFERENCES public.provider_catalog(provider_code);
+
+
+--
+-- Name: support_faqs support_faqs_category_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.support_faqs
+    ADD CONSTRAINT support_faqs_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.support_categories(id);
+
+
+--
+-- Name: support_faqs support_faqs_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.support_faqs
+    ADD CONSTRAINT support_faqs_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.admin_users(id);
+
+
+--
+-- Name: support_faqs support_faqs_tenant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.support_faqs
+    ADD CONSTRAINT support_faqs_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id);
+
+
+--
+-- Name: support_faqs support_faqs_updated_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.support_faqs
+    ADD CONSTRAINT support_faqs_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.admin_users(id);
 
 
 --
@@ -10058,6 +10193,19 @@ CREATE POLICY support_event_isolation ON public.support_ticket_events USING ((pu
    FROM public.support_tickets t
   WHERE ((t.id = support_ticket_events.ticket_id) AND (t.tenant_id = public.current_tenant_id()))))));
 
+
+--
+-- Name: support_faqs support_faq_isolation; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY support_faq_isolation ON public.support_faqs USING ((public.is_platform_admin() OR (tenant_id = public.current_tenant_id()))) WITH CHECK ((public.is_platform_admin() OR (tenant_id = public.current_tenant_id())));
+
+
+--
+-- Name: support_faqs; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.support_faqs ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: support_ticket_messages support_message_isolation; Type: POLICY; Schema: public; Owner: -
@@ -10697,6 +10845,7 @@ GRANT SELECT ON TABLE public.configuration_audit_logs TO parc_tenant_admin_reado
 
 GRANT SELECT ON TABLE public.configuration_definitions TO parc_tenant_admin_runtime;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.configuration_definitions TO parc_tenant_admin_platform;
+GRANT SELECT ON TABLE public.configuration_definitions TO parc_tenant_admin_readonly;
 
 
 --
@@ -10705,6 +10854,7 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.configuration_definitions TO p
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.configuration_versions TO parc_tenant_admin_runtime;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.configuration_versions TO parc_tenant_admin_platform;
+GRANT SELECT ON TABLE public.configuration_versions TO parc_tenant_admin_readonly;
 
 
 --
@@ -10962,24 +11112,6 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.inbox_events TO parc_tenant_ad
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.inbox_events TO parc_tenant_admin_platform;
 GRANT SELECT,INSERT,UPDATE ON TABLE public.inbox_events TO parc_tenant_admin_worker;
 GRANT SELECT ON TABLE public.inbox_events TO parc_tenant_admin_readonly;
-
-
---
--- Name: SEQUENCE knex_migrations_id_seq; Type: ACL; Schema: public; Owner: -
---
-
-GRANT SELECT,USAGE ON SEQUENCE public.knex_migrations_id_seq TO parc_tenant_admin_runtime;
-GRANT SELECT,USAGE ON SEQUENCE public.knex_migrations_id_seq TO parc_tenant_admin_platform;
-GRANT SELECT,USAGE ON SEQUENCE public.knex_migrations_id_seq TO parc_tenant_admin_worker;
-
-
---
--- Name: SEQUENCE knex_migrations_lock_index_seq; Type: ACL; Schema: public; Owner: -
---
-
-GRANT SELECT,USAGE ON SEQUENCE public.knex_migrations_lock_index_seq TO parc_tenant_admin_runtime;
-GRANT SELECT,USAGE ON SEQUENCE public.knex_migrations_lock_index_seq TO parc_tenant_admin_platform;
-GRANT SELECT,USAGE ON SEQUENCE public.knex_migrations_lock_index_seq TO parc_tenant_admin_worker;
 
 
 --
@@ -11261,13 +11393,16 @@ GRANT SELECT ON TABLE public.outbox_events_default TO parc_tenant_admin_readonly
 
 GRANT SELECT ON TABLE public.provider_capabilities TO parc_tenant_admin_runtime;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.provider_capabilities TO parc_tenant_admin_platform;
+GRANT SELECT ON TABLE public.provider_capabilities TO parc_tenant_admin_readonly;
 
 
 --
 -- Name: TABLE provider_capability_availability_history; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT ON TABLE public.provider_capability_availability_history TO parc_tenant_admin_platform;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.provider_capability_availability_history TO parc_tenant_admin_runtime;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.provider_capability_availability_history TO parc_tenant_admin_platform;
+GRANT SELECT ON TABLE public.provider_capability_availability_history TO parc_tenant_admin_readonly;
 
 
 --
@@ -11276,6 +11411,15 @@ GRANT SELECT,INSERT ON TABLE public.provider_capability_availability_history TO 
 
 GRANT SELECT ON TABLE public.provider_catalog TO parc_tenant_admin_runtime;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.provider_catalog TO parc_tenant_admin_platform;
+GRANT SELECT ON TABLE public.provider_catalog TO parc_tenant_admin_readonly;
+
+
+--
+-- Name: TABLE provider_defaults; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT ON TABLE public.provider_defaults TO parc_tenant_admin_runtime;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.provider_defaults TO parc_tenant_admin_platform;
 
 
 --
@@ -11360,6 +11504,15 @@ GRANT ALL ON TABLE public.support_categories TO parc_admin;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.support_categories TO parc_tenant_admin_runtime;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.support_categories TO parc_tenant_admin_platform;
 GRANT SELECT ON TABLE public.support_categories TO parc_tenant_admin_readonly;
+
+
+--
+-- Name: TABLE support_faqs; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.support_faqs TO parc_tenant_admin_runtime;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.support_faqs TO parc_tenant_admin_platform;
+GRANT SELECT ON TABLE public.support_faqs TO parc_tenant_admin_readonly;
 
 
 --
@@ -11451,6 +11604,7 @@ GRANT SELECT ON TABLE public.tenant_commercial_agreements TO parc_tenant_admin_r
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.tenant_configuration_publications TO parc_tenant_admin_runtime;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.tenant_configuration_publications TO parc_tenant_admin_platform;
+GRANT SELECT ON TABLE public.tenant_configuration_publications TO parc_tenant_admin_readonly;
 
 
 --
@@ -11519,6 +11673,7 @@ GRANT SELECT ON TABLE public.tenant_profiles TO parc_tenant_admin_readonly;
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.tenant_provider_selection_history TO parc_tenant_admin_runtime;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.tenant_provider_selection_history TO parc_tenant_admin_platform;
+GRANT SELECT ON TABLE public.tenant_provider_selection_history TO parc_tenant_admin_readonly;
 
 
 --
@@ -11527,6 +11682,7 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.tenant_provider_selection_hist
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.tenant_provider_selections TO parc_tenant_admin_runtime;
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.tenant_provider_selections TO parc_tenant_admin_platform;
+GRANT SELECT ON TABLE public.tenant_provider_selections TO parc_tenant_admin_readonly;
 
 
 --

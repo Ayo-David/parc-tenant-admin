@@ -22,6 +22,10 @@ import { AdministratorIdentityService } from "./services/administrator-identity-
 import { ApprovalService } from "./services/approval-service.js";
 import { ProviderSelectionService } from "./services/provider-selection-service.js";
 import { ConfigurationService } from "./services/configuration-service.js";
+import { MobileBootstrapService } from "./services/mobile-bootstrap-service.js";
+import { CustomerSupportService } from "./services/customer-support-service.js";
+import { OnboardingReferenceDataService } from "./services/onboarding-reference-data-service.js";
+import { ConsentDocumentService } from "./services/consent-document-service.js";
 
 const config = loadConfig();
 const logger = createLogger(config);
@@ -44,6 +48,14 @@ const administratorIdentity = new AdministratorIdentityService(
   roleCache,
 );
 const approvalService = new ApprovalService(database);
+const consentDocumentService = new ConsentDocumentService(
+  database,
+  approvalService,
+);
+const configurationService = new ConfigurationService(
+  database,
+  approvalService,
+);
 const allowedServices = new Set(
   config.APPROVAL_CONSUMER_SERVICES.split(",")
     .map((value) => value.trim())
@@ -90,10 +102,33 @@ const app = createApp({
     allowedServices,
   },
   configuration: {
-    service: new ConfigurationService(database, approvalService),
+    service: configurationService,
     authorizer: platformAuthorizer,
     serviceToken: config.INTERNAL_SERVICE_TOKEN,
     allowedServices,
+  },
+  mobileBootstrap: {
+    service: new MobileBootstrapService(database, configurationService),
+    serviceToken: config.INTERNAL_SERVICE_TOKEN,
+    allowedServices: new Set(["parc-mobile-bff"]),
+  },
+  customerSupport: {
+    service: new CustomerSupportService(database),
+    serviceToken: config.INTERNAL_SERVICE_TOKEN,
+    allowedServices,
+  },
+  onboardingReferenceData: {
+    service: new OnboardingReferenceDataService(
+      database,
+      consentDocumentService,
+    ),
+    serviceToken: config.INTERNAL_SERVICE_TOKEN,
+    allowedServices: new Set(["parc-mobile-bff"]),
+  },
+  consentDocuments: {
+    service: consentDocumentService,
+    authorizer: platformAuthorizer,
+    serviceToken: config.INTERNAL_SERVICE_TOKEN,
   },
 });
 const server = createServer(app);

@@ -11,7 +11,7 @@
     "yarn": "1.22.19"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && cp -R src/reference-data dist/src/reference-data",
     "clean": "rimraf dist coverage",
     "dev": "tsx watch src/server.ts",
     "format": "prettier --write .",
@@ -19,6 +19,7 @@
     "lint": "eslint .",
     "migrate:latest": "node --import tsx ./node_modules/knex/bin/cli.js --knexfile knexfile.ts migrate:latest",
     "migrate:status": "node --import tsx ./node_modules/knex/bin/cli.js --knexfile knexfile.ts migrate:status",
+    "seed:pr01": "tsx scripts/seed-pr01.ts",
     "start": "node dist/server.js",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
     "typecheck": "tsc --noEmit",
