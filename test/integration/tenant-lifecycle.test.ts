@@ -34,11 +34,28 @@ describeDatabase("tenant application and activation", () => {
   const createdTenantIds: string[] = [];
   const idempotencyRecordKeys: string[] = [];
 
-  beforeAll(() => {
+  beforeAll(async () => {
     database = knex({ client: "pg", connection: databaseUrl! });
+    await database("admin_users").insert({
+      id: administratorId,
+      tenant_id: null,
+      email: `tenant-lifecycle-${administratorId}@example.test`,
+      first_name: "Test",
+      last_name: "Admin",
+      status: "ACTIVE",
+      is_platform_admin: true,
+    });
   });
 
   afterAll(async () => {
+    try {
+      await cleanUp();
+    } finally {
+      await database.destroy();
+    }
+  });
+
+  async function cleanUp() {
     if (createdTenantIds.length > 0) {
       await database("idempotency_keys")
         .whereIn("tenant_id", createdTenantIds)
@@ -67,10 +84,13 @@ describeDatabase("tenant application and activation", () => {
       await database("tenant_profiles")
         .whereIn("tenant_id", createdTenantIds)
         .delete();
+      await database("tenant_consent_documents")
+        .whereIn("tenant_id", createdTenantIds)
+        .delete();
       await database("tenants").whereIn("id", createdTenantIds).delete();
     }
-    await database.destroy();
-  });
+    await database("admin_users").where({ id: administratorId }).delete();
+  }
 
   function app() {
     return createApp({
