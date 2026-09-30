@@ -26,14 +26,15 @@ jobs:
           REQUESTED_TAG: ${{ inputs.image_tag }}
           DEPLOY_ACTOR: ${{ github.actor }}
           GHCR_PULL_TOKEN: ${{ secrets.PARC_VPS_GHCR_PULL }}
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          INTERNAL_SERVICE_TOKEN: ${{ secrets.INTERNAL_SERVICE_TOKEN }}
-          AUTH_JWT_ISSUER: ${{ secrets.AUTH_JWT_ISSUER }}
-          AUTH_JWT_PUBLIC_KEYS_JSON: ${{ secrets.AUTH_JWT_PUBLIC_KEYS_JSON }}
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          INTERNAL_SERVICE_TOKEN: ${{ secrets.PROD_INTERNAL_SERVICE_TOKEN }}
+          AUTH_JWT_ISSUER: ${{ secrets.PROD_AUTH_JWT_ISSUER }}
+          AUTH_JWT_PUBLIC_KEYS_JSON: ${{ secrets.PROD_AUTH_JWT_PUBLIC_KEYS_JSON }}
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
+          host: ${{ secrets.SERVER_HOST }}
+          port: ${{ secrets.SERVER_PORT }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
           envs: REGISTRY,IMAGE_NAME,CONTAINER_NAME,REQUESTED_TAG,DEPLOY_ACTOR,GHCR_PULL_TOKEN,DATABASE_URL,INTERNAL_SERVICE_TOKEN,AUTH_JWT_ISSUER,AUTH_JWT_PUBLIC_KEYS_JSON
           script: |
             set -euo pipefail
