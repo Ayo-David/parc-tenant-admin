@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import knex, { type Knex } from "knex";
 import { ApprovalService } from "../../src/services/approval-service.js";
 import { ConfigurationService } from "../../src/services/configuration-service.js";
+import { MobileBootstrapService } from "../../src/services/mobile-bootstrap-service.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const describeDatabase = databaseUrl === undefined ? describe.skip : describe;
@@ -11,6 +12,7 @@ describeDatabase("versioned configuration", () => {
   let database: Knex;
   let approvals: ApprovalService;
   let configurations: ConfigurationService;
+  let mobileBootstrap: MobileBootstrapService;
   let tierId: string;
   const tenantId = randomUUID();
   const makerId = randomUUID();
@@ -22,6 +24,7 @@ describeDatabase("versioned configuration", () => {
     database = knex({ client: "pg", connection: databaseUrl! });
     approvals = new ApprovalService(database);
     configurations = new ConfigurationService(database, approvals);
+    mobileBootstrap = new MobileBootstrapService(database, configurations);
     tierId = randomUUID();
     await database("tenant_tiers").insert({
       id: tierId,
@@ -31,7 +34,7 @@ describeDatabase("versioned configuration", () => {
     });
     await database("tenants").insert({
       id: tenantId,
-      tenant_code: `CFG_${tenantId.slice(0, 8)}`,
+      tenant_code: `cfg-${tenantId.slice(0, 8)}`,
       legal_name: "Configuration Test Tenant",
       tenant_type: "OTHER",
       status: "ACTIVE",
@@ -144,6 +147,8 @@ describeDatabase("versioned configuration", () => {
     await configurations.publish({
       versionId: draft.id,
       publishedBy: scope === "TENANT" ? makerId : platformId,
+      publisherScope: scope === "TENANT" ? "TENANT" : "PLATFORM",
+      publisherTenantId: scope === "TENANT" ? tenantId : null,
       idempotencyKey: randomUUID(),
       correlationId: randomUUID(),
       expectedVersion: draft.version,
@@ -176,6 +181,28 @@ describeDatabase("versioned configuration", () => {
     });
   });
 
+  it("resolves an active tenant mobile bootstrap without exposing secret configuration", async () => {
+    await expect(
+      mobileBootstrap.resolve({
+        tenantSlug: `cfg-${tenantId.slice(0, 8)}`,
+        appVersion: "1.0.0",
+        platform: "android",
+      }),
+    ).resolves.toMatchObject({
+      tenant_id: tenantId,
+      minimum_supported_version: "1.0.0",
+      maintenance: false,
+      features: expect.any(Object),
+    });
+    await expect(
+      mobileBootstrap.resolve({
+        tenantSlug: `cfg-${tenantId.slice(0, 8)}`,
+        appVersion: "invalid",
+        platform: "ios",
+      }),
+    ).rejects.toMatchObject({ code: "APP_VERSION_INVALID" });
+  });
+
   it("requires and consumes the exact maker-checker approval for financial publication", async () => {
     const definitionId = await newDefinition(
       `pricing.test.${randomUUID()}`,
@@ -195,6 +222,8 @@ describeDatabase("versioned configuration", () => {
       configurations.publish({
         versionId: draft.id,
         publishedBy: makerId,
+        publisherScope: "TENANT",
+        publisherTenantId: tenantId,
         idempotencyKey: randomUUID(),
         correlationId: randomUUID(),
         expectedVersion: draft.version,
@@ -229,6 +258,8 @@ describeDatabase("versioned configuration", () => {
       versionId: draft.id,
       approvalId: request.result.id,
       publishedBy: makerId,
+      publisherScope: "TENANT",
+      publisherTenantId: tenantId,
       idempotencyKey: randomUUID(),
       correlationId: randomUUID(),
       expectedVersion: draft.version,
@@ -247,6 +278,52 @@ describeDatabase("versioned configuration", () => {
         .count("id as count")
         .first(),
     ).toMatchObject({ count: "2" });
+  });
+
+  it("binds configuration publication to the administrator scope and tenant", async () => {
+    const definitionId = await newDefinition(`scope.test.${randomUUID()}`);
+    const tenantDraft = (await configurations.createDraft({
+      definitionId,
+      scope: "TENANT",
+      tenantId,
+      value: "tenant-only",
+      effectiveFrom: new Date(Date.now() - 1000),
+      createdBy: makerId,
+      reason: "Tenant scope isolation test",
+      idempotencyKey: randomUUID(),
+    })) as any;
+    await expect(
+      configurations.publish({
+        versionId: tenantDraft.id,
+        publishedBy: makerId,
+        publisherScope: "TENANT",
+        publisherTenantId: randomUUID(),
+        idempotencyKey: randomUUID(),
+        correlationId: randomUUID(),
+        expectedVersion: tenantDraft.version,
+      }),
+    ).rejects.toMatchObject({ code: "TENANT_SCOPE_MISMATCH" });
+
+    const systemDraft = (await configurations.createDraft({
+      definitionId,
+      scope: "SYSTEM",
+      value: "platform-only",
+      effectiveFrom: new Date(Date.now() - 1000),
+      createdBy: platformId,
+      reason: "Platform scope isolation test",
+      idempotencyKey: randomUUID(),
+    })) as any;
+    await expect(
+      configurations.publish({
+        versionId: systemDraft.id,
+        publishedBy: makerId,
+        publisherScope: "TENANT",
+        publisherTenantId: tenantId,
+        idempotencyKey: randomUUID(),
+        correlationId: randomUUID(),
+        expectedVersion: systemDraft.version,
+      }),
+    ).rejects.toMatchObject({ code: "PLATFORM_SCOPE_REQUIRED" });
   });
 
   it("rejects stale publication and plaintext secret values", async () => {
@@ -275,6 +352,8 @@ describeDatabase("versioned configuration", () => {
       configurations.publish({
         versionId: first.id,
         publishedBy: makerId,
+        publisherScope: "TENANT",
+        publisherTenantId: tenantId,
         idempotencyKey: randomUUID(),
         correlationId: randomUUID(),
         expectedVersion: first.version,

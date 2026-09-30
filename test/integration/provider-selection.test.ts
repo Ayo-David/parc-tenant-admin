@@ -171,10 +171,24 @@ describeDatabase("provider catalog and tenant selection", () => {
     ]);
   });
 
-  it("recognizes bill payments but lists no provider until one is integrated and activated", async () => {
+  it("lists and resolves Monnify as the default bill provider", async () => {
     await expect(
       selections.listAvailable("BILL_PAYMENT", "NGN"),
-    ).resolves.toEqual([]);
+    ).resolves.toEqual([
+      expect.objectContaining({
+        provider_code: "MONNIFY",
+        capability: "BILL_PAYMENT",
+        currency: "NGN",
+      }),
+    ]);
+    await expect(
+      selections.resolve(tenantId, "BILL_PAYMENT", "NGN"),
+    ).resolves.toMatchObject({
+      tenant_id: tenantId,
+      provider: "MONNIFY",
+      approval_id: null,
+      source: "PLATFORM_DEFAULT",
+    });
   });
 
   it("uses a consumed exact approval, versions the selection, and publishes the change", async () => {
@@ -200,7 +214,11 @@ describeDatabase("provider catalog and tenant selection", () => {
       idempotencyKey: randomUUID(),
       correlationId: randomUUID(),
     });
-    expect(result.result).toMatchObject({ provider: "PAYSTACK", version: 1 });
+    expect(result.result).toMatchObject({
+      provider: "PAYSTACK",
+      version: 1,
+      source: "TENANT_OVERRIDE",
+    });
     expect(
       await selections.resolve(tenantId, "INTERBANK_TRANSFER", "NGN"),
     ).toMatchObject({ provider: "PAYSTACK", version: 1 });

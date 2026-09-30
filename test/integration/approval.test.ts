@@ -204,12 +204,16 @@ describeDatabase("bound maker-checker approvals", () => {
       .set("Idempotency-Key", consumptionKey)
       .send(body);
     expect(consumed.body.status).toBe("CONSUMED");
+    expect(consumed.body.checker_ids).toEqual([firstCheckerId]);
+    expect(consumed.body.approved_authority_level).toBe(1);
     const replayed = await request(app())
       .post(`/internal/v1/approvals/${approval.id}/consume`)
       .set(headers)
       .set("Idempotency-Key", consumptionKey)
       .send(body);
     expect(replayed.headers["idempotent-replayed"]).toBe("true");
+    expect(replayed.body.checker_ids).toEqual([firstCheckerId]);
+    expect(replayed.body.approved_authority_level).toBe(1);
     await request(app())
       .post(`/internal/v1/approvals/${approval.id}/consume`)
       .set(headers)

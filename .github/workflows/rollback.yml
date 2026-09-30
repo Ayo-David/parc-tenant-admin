@@ -1,0 +1,99 @@
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to roll back to (e.g. sha-abc1234). Leave blank to use the image that was running immediately before the last deploy."
+        required: false
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  CONTAINER_NAME: parc-tenant-admin
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - name: Roll back VPS deployment
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          REQUESTED_TAG: ${{ inputs.image_tag }}
+          DEPLOY_ACTOR: ${{ github.actor }}
+          GHCR_PULL_TOKEN: ${{ secrets.PARC_VPS_GHCR_PULL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          INTERNAL_SERVICE_TOKEN: ${{ secrets.INTERNAL_SERVICE_TOKEN }}
+          AUTH_JWT_ISSUER: ${{ secrets.AUTH_JWT_ISSUER }}
+          AUTH_JWT_PUBLIC_KEYS_JSON: ${{ secrets.AUTH_JWT_PUBLIC_KEYS_JSON }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          envs: REGISTRY,IMAGE_NAME,CONTAINER_NAME,REQUESTED_TAG,DEPLOY_ACTOR,GHCR_PULL_TOKEN,DATABASE_URL,INTERNAL_SERVICE_TOKEN,AUTH_JWT_ISSUER,AUTH_JWT_PUBLIC_KEYS_JSON
+          script: |
+            set -euo pipefail
+
+            export NODE_ENV=production HOST=0.0.0.0 PORT=3002 SERVICE_NAME=parc-tenant-admin AUTH_JWT_AUDIENCE=tenant-admin
+            STATE_DIR="$HOME/parc/${CONTAINER_NAME}"
+            mkdir -p "$STATE_DIR"
+
+            if [ -n "$REQUESTED_TAG" ]; then
+              if [[ ! "$REQUESTED_TAG" =~ ^sha-[0-9a-f]{7}$ ]]; then
+                echo "Invalid rollback image tag; expected sha- followed by 7 lowercase hex characters." >&2
+                exit 1
+              fi
+              IMAGE_URI="${REGISTRY}/${IMAGE_NAME}:${REQUESTED_TAG}"
+            elif [ -f "$STATE_DIR/previous_image.txt" ]; then
+              IMAGE_URI=$(cat "$STATE_DIR/previous_image.txt")
+            else
+              echo "No rollback target available: pass image_tag, or deploy at least twice first so a previous image is recorded." >&2
+              exit 1
+            fi
+
+            echo "Rolling back to: $IMAGE_URI"
+            echo "$GHCR_PULL_TOKEN" | docker login "$REGISTRY" -u "$DEPLOY_ACTOR" --password-stdin
+            docker pull "$IMAGE_URI"
+
+            # Deliberately no migration step here: Tenant Admin migrations are forward-only,
+            # so an application rollback never reverts schema. If the failing deploy shipped
+            # a breaking migration, that needs a reviewed forward-fix migration instead.
+
+            docker stop "$CONTAINER_NAME" || true
+            docker rm "$CONTAINER_NAME" || true
+
+            docker run -d \
+              --name "$CONTAINER_NAME" \
+              --restart always \
+              --network host \
+              -e NODE_ENV \
+              -e HOST \
+              -e PORT \
+              -e SERVICE_NAME \
+              -e DATABASE_URL \
+              -e INTERNAL_SERVICE_TOKEN \
+              -e AUTH_JWT_ISSUER \
+              -e AUTH_JWT_AUDIENCE \
+              -e AUTH_JWT_PUBLIC_KEYS_JSON \
+              "$IMAGE_URI"
+
+            ready=false
+            for i in $(seq 1 20); do
+              if curl --fail --silent --max-time 2 "http://127.0.0.1:3002/ready" >/dev/null; then
+                ready=true
+                break
+              fi
+              sleep 3
+            done
+
+            if [ "$ready" = true ]; then
+              echo "$IMAGE_URI" > "$STATE_DIR/current_image.txt"
+              echo "Rollback succeeded: $IMAGE_URI"
+            else
+              echo "Rollback container failed readiness checks." >&2
+              exit 1
+            fi

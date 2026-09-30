@@ -62,6 +62,8 @@ export interface ApprovalView {
   created_at: string;
   decided_at?: string;
   consumed_at?: string;
+  checker_ids?: string[];
+  approved_authority_level?: number;
 }
 
 export class ApprovalService {
@@ -273,7 +275,13 @@ export class ApprovalService {
           row.consumed_by_service === input.serviceName &&
           row.consumption_idempotency_key === input.idempotencyKey
         )
-          return { replayed: true, result: view(row) };
+          return {
+            replayed: true,
+            result: {
+              ...view(row),
+              ...(await approvalEvidence(transaction, row.id)),
+            },
+          };
         throw new ApiError(
           409,
           "APPROVAL_ALREADY_CONSUMED",
@@ -331,7 +339,13 @@ export class ApprovalService {
         input.correlationId,
         input.serviceName,
       );
-      return { replayed: false, result: view(updated) };
+      return {
+        replayed: false,
+        result: {
+          ...view(updated),
+          ...(await approvalEvidence(transaction, updated.id)),
+        },
+      };
     });
   }
 
@@ -450,6 +464,27 @@ export class ApprovalService {
       });
     });
   }
+}
+
+async function approvalEvidence(
+  transaction: Knex.Transaction,
+  approvalId: string,
+): Promise<{ checker_ids: string[]; approved_authority_level: number }> {
+  const approvals = await transaction("operation_approvals")
+    .where({ operation_request_id: approvalId, status: "APPROVED" })
+    .orderBy("approval_level")
+    .select<Array<{ approver_id: string; approval_level: number }>>(
+      "approver_id",
+      "approval_level",
+    );
+  if (approvals.length === 0)
+    throw new Error("Consumed approval has no checker evidence");
+  return {
+    checker_ids: approvals.map((approval) => approval.approver_id),
+    approved_authority_level: Math.max(
+      ...approvals.map((approval) => approval.approval_level),
+    ),
+  };
 }
 
 async function findLocked(

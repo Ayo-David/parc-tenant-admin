@@ -7,7 +7,7 @@ const snapshotUrl = new URL("../schema/current.sql", import.meta.url);
 const approvedExistingBaselineHash =
   "f43e534250c7ca3704fe45b2ff9397ef1d3bb6dbe3e86b3167e6544dee3d03eb";
 const canonicalSnapshotHash =
-  "482462e033bc87ac70cb6b433659226d30d85feef81327043df64f2ee126f340";
+  "aa9d7e51e6dbdd4f5929213d84ad4d41f67542b68b95bfa8156e448dd9edcabf";
 
 export const config = { transaction: false };
 
@@ -27,6 +27,15 @@ export async function up(knex: Knex): Promise<void> {
   await knex.raw(`
     DO $roles$
     BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'parc_service') THEN
+        CREATE ROLE parc_service NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'parc_readonly') THEN
+        CREATE ROLE parc_readonly NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'parc_admin') THEN
+        CREATE ROLE parc_admin NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
+      END IF;
       IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'parc_tenant_admin_runtime') THEN
         CREATE ROLE parc_tenant_admin_runtime NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS;
       END IF;

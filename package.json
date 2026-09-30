@@ -11,14 +11,16 @@
     "yarn": "1.22.19"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && mkdir -p dist/src/reference-data dist/db/schema && cp -R src/reference-data/. dist/src/reference-data/ && cp db/schema/current.sql dist/db/schema/current.sql",
     "clean": "rimraf dist coverage",
     "dev": "tsx watch src/server.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "migrate:latest": "node --import tsx ./node_modules/knex/bin/cli.js --knexfile knexfile.ts migrate:latest",
+    "migrate:runtime": "KNEX_MIGRATIONS_COMPILED=true node ./node_modules/knex/bin/cli.js --knexfile dist/knexfile.js migrate:latest",
     "migrate:status": "node --import tsx ./node_modules/knex/bin/cli.js --knexfile knexfile.ts migrate:status",
+    "seed:pr01": "tsx scripts/seed-pr01.ts",
     "start": "node dist/server.js",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
     "typecheck": "tsc --noEmit",

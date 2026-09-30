@@ -199,6 +199,11 @@ describeDatabase("administrator identity and RBAC", () => {
     });
   });
 
+  it("does not intercept unrelated internal routes", async () => {
+    const response = await request(app()).get("/internal/v1/mobile/bootstrap");
+    expect(response.status).toBe(404);
+  });
+
   it("is enumeration-resistant, commits failed attempts, and enforces tenant context", async () => {
     const key = randomUUID();
     const response = await request(app())

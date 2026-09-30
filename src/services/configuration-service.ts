@@ -172,6 +172,8 @@ export class ConfigurationService {
     versionId: string;
     approvalId?: string;
     publishedBy: string;
+    publisherScope: "TENANT" | "PLATFORM";
+    publisherTenantId: string | null;
     idempotencyKey: string;
     correlationId: string;
     expectedVersion: number;
@@ -187,6 +189,22 @@ export class ConfigurationService {
         404,
         "CONFIGURATION_VERSION_NOT_FOUND",
         "Configuration version was not found",
+      );
+    if (
+      draft.scope === "TENANT" &&
+      (input.publisherScope !== "TENANT" ||
+        input.publisherTenantId !== draft.tenant_id)
+    )
+      throw new ApiError(
+        403,
+        "TENANT_SCOPE_MISMATCH",
+        "Tenant administrator cannot publish another tenant's configuration",
+      );
+    if (draft.scope !== "TENANT" && input.publisherScope !== "PLATFORM")
+      throw new ApiError(
+        403,
+        "PLATFORM_SCOPE_REQUIRED",
+        "Platform administrator scope is required",
       );
     if (
       draft.status === "PUBLISHED" &&

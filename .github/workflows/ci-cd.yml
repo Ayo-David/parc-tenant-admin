@@ -1,0 +1,208 @@
+name: CI/CD Pipeline
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+  workflow_dispatch: {}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  CONTAINER_NAME: parc-tenant-admin
+
+jobs:
+  # 1. TEST JOB (Your existing validation setup)
+  validate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: parc_tenant_admin_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/parc_tenant_admin_test
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/parc_tenant_admin_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.21.1
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - run: yarn migrate:latest
+      - run: yarn validate
+
+  # 2. BUILD & PUSH JOB (Strictly using short-sha & build provenance)
+  build-and-push:
+    needs: validate
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # Crucial: gives GITHUB_TOKEN permission to publish packages
+
+    outputs:
+      short_sha: ${{ steps.meta.outputs.version }} # Passes the short SHA to the deploy job
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }} # No external secrets needed here
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # Primary immutable deployment unit (outputs format: sha-xxxxxxx)
+            type=sha,prefix=sha-,format=short,priority=300
+            # Floating convenience tag for development visibility
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }},priority=100
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true # Enforces build provenance generation (SLSA framework)
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+    # 3. DEPLOY JOB (Runs via SSH after build completes successfully)
+  deploy:
+    needs: build-and-push
+    if: always() && needs.build-and-push.result == 'success'
+    runs-on: ubuntu-latest
+    environment: production # requires manual approval if the "production" environment has protection rules configured
+    permissions:
+      contents: read
+    steps:
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          SHORT_SHA: ${{ needs.build-and-push.outputs.short_sha }}
+          DEPLOY_ACTOR: ${{ github.actor }}
+          VPS_GHCR_TOKEN: ${{ secrets.PARC_VPS_GHCR_PULL }}
+          PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          PROD_INTERNAL_SERVICE_TOKEN: ${{ secrets.PROD_INTERNAL_SERVICE_TOKEN }}
+          PROD_AUTH_JWT_ISSUER: ${{ secrets.PROD_AUTH_JWT_ISSUER }}
+          PROD_AUTH_JWT_PUBLIC_KEYS_JSON: ${{ secrets.PROD_AUTH_JWT_PUBLIC_KEYS_JSON }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          envs: REGISTRY,IMAGE_NAME,CONTAINER_NAME,SHORT_SHA,DEPLOY_ACTOR,PARC_VPS_GHCR_PULL,PROD_DATABASE_URL,PROD_INTERNAL_SERVICE_TOKEN,PROD_AUTH_JWT_ISSUER,PROD_AUTH_JWT_PUBLIC_KEYS_JSON
+          script: |
+            set -euo pipefail
+
+            export NODE_ENV=production HOST=0.0.0.0 PORT=3002 SERVICE_NAME=parc-tenant-admin AUTH_JWT_AUDIENCE=tenant-admin
+            TARGET_TAG="$SHORT_SHA"
+            export SERVICE_VERSION="$TARGET_TAG"
+            IMAGE_URI="${REGISTRY}/${IMAGE_NAME}:${TARGET_TAG}"
+            STATE_DIR="$HOME/parc/${CONTAINER_NAME}"
+            mkdir -p "$STATE_DIR"
+
+            # Authenticate the VPS using the Personal Access Token (PAT)
+            echo "$VPS_GHCR_TOKEN" | docker login "$REGISTRY" -u "$DEPLOY_ACTOR" --password-stdin
+
+            echo "Pulling immutable deployment unit: $IMAGE_URI"
+            docker pull "$IMAGE_URI"
+
+            # Preserve the last known-good image as the rollback target.
+            if [ -f "$STATE_DIR/current_image.txt" ]; then
+              cp "$STATE_DIR/current_image.txt" "$STATE_DIR/previous_image.txt"
+            fi
+
+            # --- STEP 1: RUN DATABASE MIGRATIONS (forward-only; never reverted on rollback) ---
+            echo "Running production database migrations..."
+            docker run --rm \
+              --name "${CONTAINER_NAME}-migration" \
+              --network host \
+              -e NODE_ENV \
+              -e DATABASE_URL \
+              "$IMAGE_URI" \
+              yarn migrate:runtime
+
+            # --- STEP 2: SWAP APPLICATION CONTAINERS ---
+            echo "Stopping old application container..."
+            docker stop "$CONTAINER_NAME" || true
+            docker rm "$CONTAINER_NAME" || true
+
+            echo "Starting new application container..."
+            # Run the container attached to the host network namespace
+            docker run -d \
+              --name "$CONTAINER_NAME" \
+              --restart always \
+              --network host \
+              -e NODE_ENV \
+              -e HOST \
+              -e PORT \
+              -e SERVICE_NAME \
+              -e SERVICE_VERSION \
+              -e DATABASE_URL \
+              -e INTERNAL_SERVICE_TOKEN \
+              -e AUTH_JWT_ISSUER \
+              -e AUTH_JWT_AUDIENCE \
+              -e AUTH_JWT_PUBLIC_KEYS_JSON \
+              "$IMAGE_URI"
+
+            # --- STEP 3: HEALTH-CHECK THE NEW CONTAINER, AUTO-ROLLBACK ON FAILURE ---
+            echo "Waiting for the new container to report ready..."
+            ready=false
+            for i in $(seq 1 20); do
+              if curl --fail --silent --max-time 2 "http://127.0.0.1:3002/ready" >/dev/null; then
+                ready=true
+                break
+              fi
+              sleep 3
+            done
+
+            if [ "$ready" = true ]; then
+              echo "$IMAGE_URI" > "$STATE_DIR/current_image.txt"
+              echo "Deploy succeeded: $IMAGE_URI"
+              docker image prune -af --filter "until=72h"
+            else
+              echo "New container failed readiness checks; rolling back." >&2
+              docker stop "$CONTAINER_NAME" || true
+              docker rm "$CONTAINER_NAME" || true
+              if [ -f "$STATE_DIR/previous_image.txt" ]; then
+                PREVIOUS_IMAGE=$(cat "$STATE_DIR/previous_image.txt")
+                docker run -d \
+                  --name "$CONTAINER_NAME" \
+                  --restart always \
+                  --network host \
+                  -e NODE_ENV \
+                  -e HOST \
+                  -e PORT \
+                  -e SERVICE_NAME \
+                  -e DATABASE_URL \
+                  -e INTERNAL_SERVICE_TOKEN \
+                  -e AUTH_JWT_ISSUER \
+                  -e AUTH_JWT_AUDIENCE \
+                  -e AUTH_JWT_PUBLIC_KEYS_JSON \
+                  "$PREVIOUS_IMAGE"
+              fi
+              exit 1
+            fi

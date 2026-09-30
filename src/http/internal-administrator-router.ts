@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { Router, type Request } from "express";
+import { Router, type Request, type RequestHandler } from "express";
 import { z } from "zod";
 import type { AdministratorIdentityService } from "../services/administrator-identity-service.js";
 import { ApiError } from "./api-error.js";
@@ -18,17 +18,18 @@ export function createInternalAdministratorRouter(input: {
   serviceToken: string;
 }): Router {
   const router = Router();
-  router.use((request, _response, next) => {
+  const authenticateService: RequestHandler = (request, _response, next) => {
     try {
       requireServiceToken(request, input.serviceToken);
       next();
     } catch (error) {
       next(error);
     }
-  });
+  };
 
   router.post(
     "/internal/v1/admin-auth/verify",
+    authenticateService,
     async (request, response, next) => {
       try {
         const body = credentialSchema.parse(request.body);
@@ -48,6 +49,7 @@ export function createInternalAdministratorRouter(input: {
 
   router.get(
     "/internal/v1/admins/:id/authorization",
+    authenticateService,
     async (request, response, next) => {
       try {
         response
@@ -63,6 +65,7 @@ export function createInternalAdministratorRouter(input: {
 
   router.get(
     "/internal/v1/tenants/:id/authentication-policy",
+    authenticateService,
     async (request, response, next) => {
       try {
         response
@@ -80,6 +83,7 @@ export function createInternalAdministratorRouter(input: {
 
   router.get(
     "/internal/v1/platform/authentication-policy",
+    authenticateService,
     async (_request, response, next) => {
       try {
         response
