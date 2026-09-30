@@ -36,6 +36,7 @@ jobs:
         with:
           node-version: 22.21.1
           cache: yarn
+      - run: corepack enable
       - run: yarn install --frozen-lockfile
       - run: yarn migrate:latest
       - run: yarn validate
