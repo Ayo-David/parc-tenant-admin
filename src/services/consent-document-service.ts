@@ -196,6 +196,7 @@ export class ConsentDocumentService {
     });
   }
 
+  /** Reuse the same idempotency key after a failure because approval consumption may already have committed. */
   public async publish(input: {
     tenantId: string;
     documentId: string;
@@ -223,6 +224,13 @@ export class ConsentDocumentService {
         409,
         "CONSENT_DOCUMENT_NOT_DRAFT",
         "Only a draft can be published",
+      );
+    const policyHost = new URL(draft.policy_uri).hostname;
+    if (policyHost === "invalid" || policyHost.endsWith(".invalid"))
+      throw new ApiError(
+        422,
+        "CONSENT_POLICY_URI_INVALID",
+        "A consent document must reference a published legal document",
       );
     await this.approvals.consume({
       scope: "TENANT",

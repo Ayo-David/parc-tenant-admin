@@ -22,19 +22,31 @@ jobs:
     steps:
       - name: Roll back VPS deployment
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          REQUESTED_TAG: ${{ inputs.image_tag }}
+          DEPLOY_ACTOR: ${{ github.actor }}
+          GHCR_PULL_TOKEN: ${{ secrets.PARC_VPS_GHCR_PULL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          INTERNAL_SERVICE_TOKEN: ${{ secrets.INTERNAL_SERVICE_TOKEN }}
+          AUTH_JWT_ISSUER: ${{ secrets.AUTH_JWT_ISSUER }}
+          AUTH_JWT_PUBLIC_KEYS_JSON: ${{ secrets.AUTH_JWT_PUBLIC_KEYS_JSON }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          envs: REGISTRY,IMAGE_NAME,CONTAINER_NAME
+          envs: REGISTRY,IMAGE_NAME,CONTAINER_NAME,REQUESTED_TAG,DEPLOY_ACTOR,GHCR_PULL_TOKEN,DATABASE_URL,INTERNAL_SERVICE_TOKEN,AUTH_JWT_ISSUER,AUTH_JWT_PUBLIC_KEYS_JSON
           script: |
             set -euo pipefail
 
+            export NODE_ENV=production HOST=0.0.0.0 PORT=3002 SERVICE_NAME=parc-tenant-admin AUTH_JWT_AUDIENCE=tenant-admin
             STATE_DIR="$HOME/parc/${CONTAINER_NAME}"
             mkdir -p "$STATE_DIR"
-            REQUESTED_TAG="${{ inputs.image_tag }}"
 
             if [ -n "$REQUESTED_TAG" ]; then
+              if [[ ! "$REQUESTED_TAG" =~ ^sha-[0-9a-f]{7}$ ]]; then
+                echo "Invalid rollback image tag; expected sha- followed by 7 lowercase hex characters." >&2
+                exit 1
+              fi
               IMAGE_URI="${REGISTRY}/${IMAGE_NAME}:${REQUESTED_TAG}"
             elif [ -f "$STATE_DIR/previous_image.txt" ]; then
               IMAGE_URI=$(cat "$STATE_DIR/previous_image.txt")
@@ -44,7 +56,7 @@ jobs:
             fi
 
             echo "Rolling back to: $IMAGE_URI"
-            echo "${{ secrets.PARC_VPS_GHCR_PULL }}" | docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+            echo "$GHCR_PULL_TOKEN" | docker login "$REGISTRY" -u "$DEPLOY_ACTOR" --password-stdin
             docker pull "$IMAGE_URI"
 
             # Deliberately no migration step here: Tenant Admin migrations are forward-only,
@@ -58,15 +70,15 @@ jobs:
               --name "$CONTAINER_NAME" \
               --restart always \
               --network host \
-              -e NODE_ENV=production \
-              -e HOST=0.0.0.0 \
-              -e PORT=3002 \
-              -e SERVICE_NAME=parc-tenant-admin \
-              -e DATABASE_URL="${{ secrets.DATABASE_URL }}" \
-              -e INTERNAL_SERVICE_TOKEN="${{ secrets.INTERNAL_SERVICE_TOKEN }}" \
-              -e AUTH_JWT_ISSUER="${{ secrets.AUTH_JWT_ISSUER }}" \
-              -e AUTH_JWT_AUDIENCE=tenant-admin \
-              -e AUTH_JWT_PUBLIC_KEYS_JSON='${{ secrets.AUTH_JWT_PUBLIC_KEYS_JSON }}' \
+              -e NODE_ENV \
+              -e HOST \
+              -e PORT \
+              -e SERVICE_NAME \
+              -e DATABASE_URL \
+              -e INTERNAL_SERVICE_TOKEN \
+              -e AUTH_JWT_ISSUER \
+              -e AUTH_JWT_AUDIENCE \
+              -e AUTH_JWT_PUBLIC_KEYS_JSON \
               "$IMAGE_URI"
 
             ready=false

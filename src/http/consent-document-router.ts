@@ -22,6 +22,7 @@ export function createConsentDocumentRouter(input: {
   service: ConsentDocumentService;
   authorizer: AdministratorAuthorizer;
   serviceToken: string;
+  allowedServices: ReadonlySet<string>;
 }): Router {
   const router = Router();
   router.get("/v1/consent-documents", async (req, res, next) => {
@@ -122,7 +123,7 @@ export function createConsentDocumentRouter(input: {
     "/internal/v1/tenants/:id/consent-documents/validate",
     async (req, res, next) => {
       try {
-        serviceAuth(req, input.serviceToken);
+        serviceAuth(req, input);
         const tenantId = uuid.parse(req.params.id);
         const body = z
           .object({ consent_ids: z.array(uuid).min(1).max(20) })
@@ -153,14 +154,16 @@ function requiredHeader(req: Request, name: string): string {
     );
   return value;
 }
-function serviceAuth(req: Request, expected: string): void {
-  const supplied =
-    req.header("x-internal-service-token") ??
-    req.header("authorization")?.replace(/^Bearer /, "") ??
-    "";
+function serviceAuth(
+  req: Request,
+  input: { serviceToken: string; allowedServices: ReadonlySet<string> },
+): void {
+  const supplied = req.header("x-internal-service-token") ?? "";
+  const service = req.header("x-calling-service") ?? "";
   if (
-    Buffer.byteLength(supplied) !== Buffer.byteLength(expected) ||
-    !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))
+    !input.allowedServices.has(service) ||
+    Buffer.byteLength(supplied) !== Buffer.byteLength(input.serviceToken) ||
+    !timingSafeEqual(Buffer.from(supplied), Buffer.from(input.serviceToken))
   )
     throw new ApiError(
       401,

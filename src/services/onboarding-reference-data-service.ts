@@ -66,7 +66,10 @@ export class OnboardingReferenceDataService {
         "ONBOARDING_REFERENCE_OVERRIDE_REQUIRED",
         "A tenant onboarding reference-data override is required outside Nigeria",
       );
-    this.nigeria ??= this.loadNigeria();
+    this.nigeria ??= this.loadNigeria().catch((error: unknown) => {
+      delete this.nigeria;
+      throw error;
+    });
     return {
       ...(await this.nigeria),
       consent_documents: await this.consents.listCurrent(tenantId),

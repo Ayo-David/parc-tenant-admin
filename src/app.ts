@@ -78,6 +78,7 @@ export function createApp(input: {
     service: ConsentDocumentService;
     authorizer: AdministratorAuthorizer;
     serviceToken: string;
+    allowedServices: ReadonlySet<string>;
   };
 }): Express {
   const app = express();

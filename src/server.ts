@@ -129,6 +129,7 @@ const app = createApp({
     service: consentDocumentService,
     authorizer: platformAuthorizer,
     serviceToken: config.INTERNAL_SERVICE_TOKEN,
+    allowedServices,
   },
 });
 const server = createServer(app);

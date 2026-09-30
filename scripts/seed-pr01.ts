@@ -16,6 +16,7 @@ interface ConsentDraft {
   id: string;
   tenant_id: string;
   consent_type: string;
+  channel: string;
   document_version: string;
   policy_uri: string;
   evidence_digest: string;
@@ -98,7 +99,7 @@ try {
             purpose: "consent-publication",
           }),
         })
-        .onConflict("email")
+        .onConflict(database.raw("(lower(email)) where deleted_at is null"))
         .merge({
           status: "ACTIVE",
           deleted_at: null,
@@ -113,12 +114,25 @@ try {
           "id",
           "tenant_id",
           "consent_type",
+          "channel",
           "document_version",
           "policy_uri",
           "evidence_digest",
           "required_at_registration",
         );
       for (const draft of drafts) {
+        await transaction("tenant_consent_documents")
+          .where({
+            tenant_id: draft.tenant_id,
+            consent_type: draft.consent_type,
+            channel: draft.channel,
+            status: "PUBLISHED",
+          })
+          .update({
+            status: "RETIRED",
+            effective_until: transaction.fn.now(),
+            updated_at: transaction.fn.now(),
+          });
         const binding = {
           id: draft.id,
           tenant_id: draft.tenant_id,

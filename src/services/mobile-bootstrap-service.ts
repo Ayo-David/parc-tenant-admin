@@ -44,7 +44,11 @@ export class MobileBootstrapService {
     const values = new Map(
       resolved.configurations.map((item) => [item.key, item.value]),
     );
-    const minimum = stringValue(values.get(minimumKey), "1.0.0");
+    versionParts(input.appVersion);
+    const configuredMinimum = stringValue(values.get(minimumKey), "1.0.0");
+    const minimum = isValidVersion(configuredMinimum)
+      ? configuredMinimum
+      : "1.0.0";
     if (compareVersions(input.appVersion, minimum) < 0)
       throw new ApiError(
         426,
@@ -113,8 +117,11 @@ function compareVersions(left: string, right: string): number {
   }
   return 0;
 }
+function isValidVersion(value: string): boolean {
+  return /^\d+(\.\d+){0,3}$/.test(value);
+}
 function versionParts(value: string): number[] {
-  if (!/^\d+(\.\d+){0,3}$/.test(value))
+  if (!isValidVersion(value))
     throw new ApiError(422, "APP_VERSION_INVALID", "App version is invalid");
   return value.split(".").map(Number);
 }
