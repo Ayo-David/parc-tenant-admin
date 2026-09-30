@@ -31,6 +31,7 @@ jobs:
             set -euo pipefail
 
             STATE_DIR="$HOME/parc/${CONTAINER_NAME}"
+            mkdir -p "$STATE_DIR"
             REQUESTED_TAG="${{ inputs.image_tag }}"
 
             if [ -n "$REQUESTED_TAG" ]; then
@@ -43,7 +44,7 @@ jobs:
             fi
 
             echo "Rolling back to: $IMAGE_URI"
-            echo "${{ secrets.VPS_GHCR_TOKEN }}" | docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+            echo "${{ secrets.PARC_VPS_GHCR_PULL }}" | docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
             docker pull "$IMAGE_URI"
 
             # Deliberately no migration step here: Tenant Admin migrations are forward-only,
@@ -61,11 +62,11 @@ jobs:
               -e HOST=0.0.0.0 \
               -e PORT=3002 \
               -e SERVICE_NAME=parc-tenant-admin \
-              -e DATABASE_URL="${{ secrets.PROD_DATABASE_URL }}" \
-              -e INTERNAL_SERVICE_TOKEN="${{ secrets.PROD_INTERNAL_SERVICE_TOKEN }}" \
-              -e AUTH_JWT_ISSUER="${{ secrets.PROD_AUTH_JWT_ISSUER }}" \
+              -e DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+              -e INTERNAL_SERVICE_TOKEN="${{ secrets.INTERNAL_SERVICE_TOKEN }}" \
+              -e AUTH_JWT_ISSUER="${{ secrets.AUTH_JWT_ISSUER }}" \
               -e AUTH_JWT_AUDIENCE=tenant-admin \
-              -e AUTH_JWT_PUBLIC_KEYS_JSON="${{ secrets.PROD_AUTH_JWT_PUBLIC_KEYS_JSON }}" \
+              -e AUTH_JWT_PUBLIC_KEYS_JSON='${{ secrets.AUTH_JWT_PUBLIC_KEYS_JSON }}' \
               "$IMAGE_URI"
 
             ready=false
