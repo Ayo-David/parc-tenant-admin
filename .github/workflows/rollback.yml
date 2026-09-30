@@ -48,6 +48,8 @@ jobs:
                 echo "Invalid rollback image tag; expected sha- followed by 7 lowercase hex characters." >&2
                 exit 1
               fi
+              # Image references must be lowercase; metadata-action lowercased the pushed name.
+              IMAGE_NAME=$(printf '%s' "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
               IMAGE_URI="${REGISTRY}/${IMAGE_NAME}:${REQUESTED_TAG}"
             elif [ -f "$STATE_DIR/previous_image.txt" ]; then
               IMAGE_URI=$(cat "$STATE_DIR/previous_image.txt")
