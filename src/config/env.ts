@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+const databaseSchema = z.object({
+  DATABASE_URL: z.string().min(1).default("postgresql:///parc_tenant_admin"),
+});
+
 const schema = z
   .object({
     NODE_ENV: z
@@ -13,7 +17,7 @@ const schema = z
     SERVICE_NAME: z.string().min(1).default("parc-tenant-admin"),
     SERVICE_VERSION: z.string().min(1).default("0.1.0"),
     SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
-    DATABASE_URL: z.string().min(1).default("postgresql:///parc_tenant_admin"),
+    ...databaseSchema.shape,
     DATABASE_POOL_MIN: z.coerce.number().int().min(0).default(0),
     DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
     INTERNAL_SERVICE_TOKEN: z
@@ -59,4 +63,11 @@ export function loadConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): AppConfig {
   return schema.parse(environment);
+}
+
+/** Database settings only, so migrations can run without the application's secrets. */
+export function loadDatabaseConfig(
+  environment: NodeJS.ProcessEnv = process.env,
+): z.infer<typeof databaseSchema> {
+  return databaseSchema.parse(environment);
 }
