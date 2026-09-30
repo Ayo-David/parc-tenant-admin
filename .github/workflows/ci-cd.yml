@@ -106,15 +106,16 @@ jobs:
           SHORT_SHA: ${{ needs.build-and-push.outputs.short_sha }}
           DEPLOY_ACTOR: ${{ github.actor }}
           VPS_GHCR_TOKEN: ${{ secrets.PARC_VPS_GHCR_PULL }}
-          PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
-          PROD_INTERNAL_SERVICE_TOKEN: ${{ secrets.PROD_INTERNAL_SERVICE_TOKEN }}
-          PROD_AUTH_JWT_ISSUER: ${{ secrets.PROD_AUTH_JWT_ISSUER }}
-          PROD_AUTH_JWT_PUBLIC_KEYS_JSON: ${{ secrets.PROD_AUTH_JWT_PUBLIC_KEYS_JSON }}
+          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          INTERNAL_SERVICE_TOKEN: ${{ secrets.PROD_INTERNAL_SERVICE_TOKEN }}
+          AUTH_JWT_ISSUER: ${{ secrets.PROD_AUTH_JWT_ISSUER }}
+          AUTH_JWT_PUBLIC_KEYS_JSON: ${{ secrets.PROD_AUTH_JWT_PUBLIC_KEYS_JSON }}
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          envs: REGISTRY,IMAGE_NAME,CONTAINER_NAME,SHORT_SHA,DEPLOY_ACTOR,PARC_VPS_GHCR_PULL,PROD_DATABASE_URL,PROD_INTERNAL_SERVICE_TOKEN,PROD_AUTH_JWT_ISSUER,PROD_AUTH_JWT_PUBLIC_KEYS_JSON
+          host: ${{ secrets.SERVER_HOST }}
+          port: ${{ secrets.SERVER_PORT }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: REGISTRY,IMAGE_NAME,CONTAINER_NAME,SHORT_SHA,DEPLOY_ACTOR,VPS_GHCR_TOKEN,DATABASE_URL,INTERNAL_SERVICE_TOKEN,AUTH_JWT_ISSUER,AUTH_JWT_PUBLIC_KEYS_JSON
           script: |
             set -euo pipefail
 
