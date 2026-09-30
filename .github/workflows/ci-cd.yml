@@ -156,7 +156,7 @@ jobs:
               -e INTERNAL_SERVICE_TOKEN="${{ secrets.PROD_INTERNAL_SERVICE_TOKEN }}" \
               -e AUTH_JWT_ISSUER="${{ secrets.PROD_AUTH_JWT_ISSUER }}" \
               -e AUTH_JWT_AUDIENCE=tenant-admin \
-              -e AUTH_JWT_PUBLIC_KEYS_JSON="${{ secrets.PROD_AUTH_JWT_PUBLIC_KEYS_JSON }}" \
+              -e AUTH_JWT_PUBLIC_KEYS_JSON='${{ secrets.PROD_AUTH_JWT_PUBLIC_KEYS_JSON }}' \
               "$IMAGE_URI"
 
             # --- STEP 3: HEALTH-CHECK THE NEW CONTAINER, AUTO-ROLLBACK ON FAILURE ---
@@ -192,7 +192,7 @@ jobs:
                   -e INTERNAL_SERVICE_TOKEN="${{ secrets.PROD_INTERNAL_SERVICE_TOKEN }}" \
                   -e AUTH_JWT_ISSUER="${{ secrets.PROD_AUTH_JWT_ISSUER }}" \
                   -e AUTH_JWT_AUDIENCE=tenant-admin \
-                  -e AUTH_JWT_PUBLIC_KEYS_JSON="${{ secrets.PROD_AUTH_JWT_PUBLIC_KEYS_JSON }}" \
+                  -e AUTH_JWT_PUBLIC_KEYS_JSON='${{ secrets.PROD_AUTH_JWT_PUBLIC_KEYS_JSON }}' \
                   "$PREVIOUS_IMAGE"
               fi
               exit 1
