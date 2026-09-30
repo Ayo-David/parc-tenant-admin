@@ -122,6 +122,8 @@ jobs:
             export NODE_ENV=production HOST=0.0.0.0 PORT=3002 SERVICE_NAME=parc-tenant-admin AUTH_JWT_AUDIENCE=tenant-admin
             TARGET_TAG="$SHORT_SHA"
             export SERVICE_VERSION="$TARGET_TAG"
+            # Image references must be lowercase; metadata-action lowercased the pushed name.
+            IMAGE_NAME=$(printf '%s' "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
             IMAGE_URI="${REGISTRY}/${IMAGE_NAME}:${TARGET_TAG}"
             STATE_DIR="$HOME/parc/${CONTAINER_NAME}"
             mkdir -p "$STATE_DIR"
