@@ -7,7 +7,7 @@ const snapshotUrl = new URL("../schema/current.sql", import.meta.url);
 const approvedExistingBaselineHash =
   "f43e534250c7ca3704fe45b2ff9397ef1d3bb6dbe3e86b3167e6544dee3d03eb";
 const canonicalSnapshotHash =
-  "aa9d7e51e6dbdd4f5929213d84ad4d41f67542b68b95bfa8156e448dd9edcabf";
+  "1f8ff335a94bbd70247d394d4645f27a29332436df88ad9b0b37f7e49663a9c8";
 
 export const config = { transaction: false };
 
@@ -60,7 +60,10 @@ export async function up(knex: Knex): Promise<void> {
     );
   }
   await knex.raw(sql);
-  // pg_dump intentionally clears search_path; restore it for Knex's migration bookkeeping.
+  // pg_dump's session settings (row_security = off, check_function_bodies = false, an
+  // empty search_path, ...) persist on this pooled connection; reset them before later migrations.
+  await knex.raw("RESET ALL");
+  // Restore search_path for Knex's migration bookkeeping.
   await knex.raw("SET search_path TO public");
 }
 
