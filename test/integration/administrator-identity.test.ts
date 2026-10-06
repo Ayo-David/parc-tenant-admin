@@ -1,22 +1,24 @@
 import { randomUUID } from "node:crypto";
 import argon2 from "argon2";
 import knex, { type Knex } from "knex";
-import { exportSPKI, generateKeyPair, importSPKI, SignJWT } from "jose";
 import pino from "pino";
 import request from "supertest";
 import { createApp } from "../../src/app.js";
-import { AdministratorJwtAuthorizer } from "../../src/auth/administrator-jwt-authorizer.js";
+import { AdministratorTokenAuthorizer } from "../../src/auth/administrator-token-authorizer.js";
 import { MemoryRoleMetadataCache } from "../../src/auth/role-metadata-cache.js";
 import { loadConfig } from "../../src/config/env.js";
 import { AdministratorIdentityService } from "../../src/services/administrator-identity-service.js";
+import { serviceTokens } from "../support/service-tokens.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const describeDatabase = databaseUrl === undefined ? describe.skip : describe;
-const serviceToken = "test-internal-service-token-at-least-32-characters";
+const idempotencySecret = "test-idempotency-secret-at-least-32-characters";
 
 describeDatabase("administrator identity and RBAC", () => {
   let database: Knex;
   let identity: AdministratorIdentityService;
+  let tokens: Awaited<ReturnType<typeof serviceTokens>>;
+  let serviceToken: string;
   const tenantId = randomUUID();
   const platformAdministratorId = randomUUID();
   const tenantAdministratorId = randomUUID();
@@ -27,9 +29,16 @@ describeDatabase("administrator identity and RBAC", () => {
 
   beforeAll(async () => {
     database = knex({ client: "pg", connection: databaseUrl! });
+    tokens = await serviceTokens();
+    // Auth's own platform-level service token for administrator verification.
+    serviceToken = await tokens.service(
+      "parc-auth-customer",
+      "tenant.administrators.authenticate",
+      null,
+    );
     identity = new AdministratorIdentityService(
       database,
-      serviceToken,
+      idempotencySecret,
       new MemoryRoleMetadataCache(30),
     );
     const passwordHash = await argon2.hash("CorrectHorseBatteryStaple!", {
@@ -151,7 +160,8 @@ describeDatabase("administrator identity and RBAC", () => {
     return createApp({
       config: loadConfig({ NODE_ENV: "test" }),
       logger: pino({ enabled: false }),
-      administratorIdentity: { service: identity, serviceToken },
+      serviceAuth: tokens.serviceAuth,
+      administratorIdentity: { service: identity },
     });
   }
 
@@ -199,9 +209,32 @@ describeDatabase("administrator identity and RBAC", () => {
     });
   });
 
-  it("does not intercept unrelated internal routes", async () => {
-    const response = await request(app()).get("/internal/v1/mobile/bootstrap");
+  it("authenticates every internal route but does not intercept unrelated ones", async () => {
+    expect(
+      (await request(app()).get("/internal/v1/mobile/bootstrap")).status,
+    ).toBe(401);
+    const response = await request(app())
+      .get("/internal/v1/mobile/bootstrap")
+      .set("Authorization", `Bearer ${serviceToken}`);
     expect(response.status).toBe(404);
+  });
+
+  it("rejects administrator routes for other callers or scopes", async () => {
+    for (const token of [
+      await tokens.service(
+        "parc-payment",
+        "tenant.administrators.authenticate",
+        null,
+      ),
+      await tokens.service("parc-auth-customer", "tenant.status.read", null),
+    ])
+      expect(
+        (
+          await request(app())
+            .get(`/internal/v1/admins/${platformAdministratorId}/authorization`)
+            .set("Authorization", `Bearer ${token}`)
+        ).status,
+      ).toBe(403);
   });
 
   it("is enumeration-resistant, commits failed attempts, and enforces tenant context", async () => {
@@ -258,44 +291,35 @@ describeDatabase("administrator identity and RBAC", () => {
     ).toEqual({ status: "LOCKED", failed_login_attempts: 5 });
   });
 
-  it("validates RS256 audience, MFA, scope, live authorization version, and permission", async () => {
-    const keys = await generateKeyPair("RS256");
-    const publicKey = await importSPKI(
-      await exportSPKI(keys.publicKey),
-      "RS256",
-    );
-    const authorizer = new AdministratorJwtAuthorizer(
+  it("authorizes console calls from Admin BFF delegations with live status and permission", async () => {
+    const authorizer = new AdministratorTokenAuthorizer(
       database,
-      "https://auth.parc.invalid",
-      "tenant-admin",
-      new Map([["test-key", publicKey]]),
+      tokens.serviceAuth,
     );
     const permission = "tenant.create";
-    const token = await new SignJWT({
-      tenant_id: null,
-      session_id: randomUUID(),
-      subject_type: "ADMINISTRATOR",
-      scope: "PLATFORM",
-      authorization_version: 1,
-      authentication_methods: ["PASSWORD", "TOTP", "MFA"],
-    })
-      .setProtectedHeader({ alg: "RS256", kid: "test-key" })
-      .setIssuer("https://auth.parc.invalid")
-      .setAudience(["admin-bff", "tenant-admin"])
-      .setSubject(platformAdministratorId)
-      .setIssuedAt()
-      .setExpirationTime("5m")
-      .sign(keys.privateKey);
+    const token = await tokens.administrator(platformAdministratorId, null);
     await expect(authorizer.authorize(token, permission)).resolves.toEqual({
       administratorId: platformAdministratorId,
     });
     await expect(
       authorizer.authorize(token, "tenant.delete"),
     ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      authorizer.authorize(
+        await tokens.service("parc-admin-bff", "tenant.administration", null),
+        permission,
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      authorizer.authorize(
+        await tokens.administrator(tenantAdministratorId, randomUUID()),
+        permission,
+      ),
+    ).rejects.toMatchObject({ code: "AUTHORIZATION_STALE" });
 
     await database("admin_users")
       .where({ id: platformAdministratorId })
-      .increment("authorization_version", 1);
+      .update({ status: "SUSPENDED" });
     await expect(authorizer.authorize(token, permission)).rejects.toMatchObject(
       {
         code: "AUTHORIZATION_STALE",

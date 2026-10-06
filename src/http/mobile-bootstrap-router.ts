@@ -1,8 +1,11 @@
-import { timingSafeEqual } from "node:crypto";
 import { Router, type Request } from "express";
 import { z } from "zod";
 import type { MobileBootstrapService } from "../services/mobile-bootstrap-service.js";
 import { ApiError } from "./api-error.js";
+import {
+  requireServiceAccess,
+  tenantAdminAccessPolicies,
+} from "./service-access.js";
 
 const query = z.object({
   tenant_slug: z.string().regex(/^[a-z0-9][a-z0-9-]{1,62}$/),
@@ -12,7 +15,6 @@ const query = z.object({
 
 export function createMobileBootstrapRouter(input: {
   service: MobileBootstrapService;
-  serviceToken: string;
   allowedServices: ReadonlySet<string>;
 }): Router {
   const router = Router();
@@ -45,18 +47,11 @@ export function createMobileBootstrapRouter(input: {
 
 function authenticate(
   request: Request,
-  input: { serviceToken: string; allowedServices: ReadonlySet<string> },
+  input: { allowedServices: ReadonlySet<string> },
 ): void {
-  const token = request.header("x-internal-service-token") ?? "";
-  const caller = request.header("x-calling-service") ?? "";
-  if (
-    !input.allowedServices.has(caller) ||
-    Buffer.byteLength(token) !== Buffer.byteLength(input.serviceToken) ||
-    !timingSafeEqual(Buffer.from(token), Buffer.from(input.serviceToken))
-  )
-    throw new ApiError(
-      401,
-      "UNAUTHORIZED_SERVICE",
-      "Valid internal service authentication is required",
-    );
+  requireServiceAccess(
+    request,
+    tenantAdminAccessPolicies.mobileBootstrap,
+    input.allowedServices,
+  );
 }

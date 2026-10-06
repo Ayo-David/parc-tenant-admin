@@ -1,4 +1,4 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   Router,
   type NextFunction,
@@ -12,6 +12,10 @@ import type {
   ApprovalService,
 } from "../services/approval-service.js";
 import { ApiError } from "./api-error.js";
+import {
+  requireServiceAccess,
+  tenantAdminAccessPolicies,
+} from "./service-access.js";
 
 const uuid = z.string().uuid();
 const bindingShape = {
@@ -67,7 +71,6 @@ const execution = z
 export function createApprovalRouter(input: {
   service: ApprovalService;
   authorizer: AdministratorAuthorizer;
-  serviceToken: string;
   allowedServices: ReadonlySet<string>;
 }): Router {
   const router = Router();
@@ -296,21 +299,11 @@ function correlation(request: Request): string {
     : randomUUID();
 }
 function authenticateService(request: Request, input: Dependencies): string {
-  const supplied = request.header("X-Service-Token") ?? "";
-  const expected = input.serviceToken;
-  if (
-    supplied.length !== expected.length ||
-    !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))
-  )
-    throw new ApiError(401, "UNAUTHORIZED", "Service authentication failed");
-  const service = request.header("X-Service-Name");
-  if (service === undefined || !input.allowedServices.has(service))
-    throw new ApiError(
-      403,
-      "SERVICE_NOT_ALLOWED",
-      "Calling service is not approved",
-    );
-  return service;
+  return requireServiceAccess(
+    request,
+    tenantAdminAccessPolicies.approvals,
+    input.allowedServices,
+  ).client;
 }
 function normalize(error: unknown): unknown {
   if (error instanceof z.ZodError)

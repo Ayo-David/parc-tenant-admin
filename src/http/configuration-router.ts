@@ -1,9 +1,13 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { Router, type Request } from "express";
 import { z } from "zod";
 import type { AdministratorAuthorizer } from "../auth/platform-authorizer.js";
 import type { ConfigurationService } from "../services/configuration-service.js";
 import { ApiError } from "./api-error.js";
+import {
+  requireServiceAccess,
+  tenantAdminAccessPolicies,
+} from "./service-access.js";
 
 const uuid = z.string().uuid();
 const definition = z
@@ -44,7 +48,6 @@ const draft = z
 export function createConfigurationRouter(input: {
   service: ConfigurationService;
   authorizer: AdministratorAuthorizer;
-  serviceToken: string;
   allowedServices: ReadonlySet<string>;
 }): Router {
   const router = Router();
@@ -197,20 +200,13 @@ function correlation(req: Request): string {
 }
 function serviceAuth(
   req: Request,
-  input: { serviceToken: string; allowedServices: ReadonlySet<string> },
+  input: { allowedServices: ReadonlySet<string> },
 ): void {
-  const token = req.header("x-internal-service-token") ?? "";
-  const service = req.header("x-calling-service") ?? "";
-  if (
-    !input.allowedServices.has(service) ||
-    token.length !== input.serviceToken.length ||
-    !timingSafeEqual(Buffer.from(token), Buffer.from(input.serviceToken))
-  )
-    throw new ApiError(
-      401,
-      "UNAUTHORIZED_SERVICE",
-      "Valid internal service authentication is required",
-    );
+  requireServiceAccess(
+    req,
+    tenantAdminAccessPolicies.configuration,
+    input.allowedServices,
+  );
 }
 function normalize(error: unknown): ApiError {
   return error instanceof ApiError

@@ -1,10 +1,9 @@
 import { createServer } from "node:http";
 import { createApp } from "./app.js";
 import { UnconfiguredAdministratorAuthorizer } from "./auth/platform-authorizer.js";
-import {
-  AdministratorJwtAuthorizer,
-  importAdministratorJwtPublicKeys,
-} from "./auth/administrator-jwt-authorizer.js";
+import { importAdministratorJwtPublicKeys } from "./auth/auth-public-keys.js";
+import { AdministratorTokenAuthorizer } from "./auth/administrator-token-authorizer.js";
+import { createParcAuth } from "./security/parc-service-auth.js";
 import {
   MemoryRoleMetadataCache,
   RedisRoleMetadataCache,
@@ -44,7 +43,7 @@ const roleCache =
     : new RedisRoleMetadataCache(redis, config.AUTHORIZATION_CACHE_TTL_SECONDS);
 const administratorIdentity = new AdministratorIdentityService(
   database,
-  config.INTERNAL_SERVICE_TOKEN,
+  config.IDEMPOTENCY_HASH_SECRET,
   roleCache,
 );
 const approvalService = new ApprovalService(database);
@@ -61,20 +60,38 @@ const allowedServices = new Set(
     .map((value) => value.trim())
     .filter(Boolean),
 );
-const platformAuthorizer =
+// Every inbound internal and console call carries an Auth-issued token for
+// this audience; platform-level (tenantless) tokens are accepted here only.
+const staticKeys =
   config.AUTH_JWT_PUBLIC_KEYS_JSON === undefined
+    ? undefined
+    : await importAdministratorJwtPublicKeys(config.AUTH_JWT_PUBLIC_KEYS_JSON);
+const serviceAuth =
+  staticKeys === undefined && config.AUTH_JWKS_URL === undefined
+    ? undefined
+    : createParcAuth({
+        issuer: config.AUTH_JWT_ISSUER,
+        audience: config.SERVICE_NAME,
+        allowPlatformTenant: true,
+        ...(staticKeys === undefined
+          ? { jwksUrl: config.AUTH_JWKS_URL ?? "" }
+          : {
+              keys: ({ kid }) => {
+                const key = kid === undefined ? undefined : staticKeys.get(kid);
+                if (key === undefined) throw new Error("Unknown JWT key");
+                return key;
+              },
+            }),
+      });
+const platformAuthorizer =
+  serviceAuth === undefined
     ? new UnconfiguredAdministratorAuthorizer()
-    : new AdministratorJwtAuthorizer(
-        database,
-        config.AUTH_JWT_ISSUER,
-        config.AUTH_JWT_AUDIENCE,
-        await importAdministratorJwtPublicKeys(
-          config.AUTH_JWT_PUBLIC_KEYS_JSON,
-        ),
-      );
+    : new AdministratorTokenAuthorizer(database, serviceAuth);
 const app = createApp({
   config,
   logger,
+  database,
+  ...(serviceAuth === undefined ? {} : { serviceAuth }),
   readinessChecks: [
     { name: "database", check: () => checkDatabase(database) },
     ...(redis === undefined
@@ -87,48 +104,40 @@ const app = createApp({
   },
   administratorIdentity: {
     service: administratorIdentity,
-    serviceToken: config.INTERNAL_SERVICE_TOKEN,
   },
   approvals: {
     service: approvalService,
     authorizer: platformAuthorizer,
-    serviceToken: config.INTERNAL_SERVICE_TOKEN,
     allowedServices,
   },
   providerSelection: {
     service: new ProviderSelectionService(database, approvalService),
     authorizer: platformAuthorizer,
-    serviceToken: config.INTERNAL_SERVICE_TOKEN,
     allowedServices,
   },
   configuration: {
     service: configurationService,
     authorizer: platformAuthorizer,
-    serviceToken: config.INTERNAL_SERVICE_TOKEN,
     allowedServices,
   },
   mobileBootstrap: {
     service: new MobileBootstrapService(database, configurationService),
-    serviceToken: config.INTERNAL_SERVICE_TOKEN,
     allowedServices: new Set(["parc-mobile-bff"]),
   },
   customerSupport: {
     service: new CustomerSupportService(database),
-    serviceToken: config.INTERNAL_SERVICE_TOKEN,
-    allowedServices,
+    allowedServices: new Set(["parc-mobile-bff"]),
   },
   onboardingReferenceData: {
     service: new OnboardingReferenceDataService(
       database,
       consentDocumentService,
     ),
-    serviceToken: config.INTERNAL_SERVICE_TOKEN,
     allowedServices: new Set(["parc-mobile-bff"]),
   },
   consentDocuments: {
     service: consentDocumentService,
     authorizer: platformAuthorizer,
-    serviceToken: config.INTERNAL_SERVICE_TOKEN,
     allowedServices,
   },
 });

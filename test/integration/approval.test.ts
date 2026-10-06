@@ -10,10 +10,10 @@ import type {
 } from "../../src/auth/platform-authorizer.js";
 import { loadConfig } from "../../src/config/env.js";
 import { ApprovalService } from "../../src/services/approval-service.js";
+import { serviceTokens } from "../support/service-tokens.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const describeDatabase = databaseUrl === undefined ? describe.skip : describe;
-const serviceToken = "approval-test-service-token-at-least-32-chars";
 
 class TestAuthorizer implements AdministratorAuthorizer {
   public principal: AdministratorPrincipal;
@@ -31,6 +31,8 @@ class TestAuthorizer implements AdministratorAuthorizer {
 describeDatabase("bound maker-checker approvals", () => {
   let database: Knex;
   let service: ApprovalService;
+  let tokens: Awaited<ReturnType<typeof serviceTokens>>;
+  let serviceToken: string;
   const tenantId = randomUUID();
   const makerId = randomUUID();
   const firstCheckerId = randomUUID();
@@ -44,6 +46,12 @@ describeDatabase("bound maker-checker approvals", () => {
   beforeAll(async () => {
     database = knex({ client: "pg", connection: databaseUrl! });
     service = new ApprovalService(database);
+    tokens = await serviceTokens();
+    serviceToken = await tokens.service(
+      "parc-payment",
+      "tenant.approvals.consume",
+      tenantId,
+    );
     await database("tenants").insert({
       id: tenantId,
       tenant_code: `APR_${tenantId.replaceAll("-", "").slice(0, 8)}`,
@@ -91,10 +99,10 @@ describeDatabase("bound maker-checker approvals", () => {
     return createApp({
       config: loadConfig({ NODE_ENV: "test" }),
       logger: pino({ enabled: false }),
+      serviceAuth: tokens.serviceAuth,
       approvals: {
         service,
         authorizer,
-        serviceToken,
         allowedServices: new Set(["parc-payment"]),
       },
     });
@@ -187,8 +195,8 @@ describeDatabase("bound maker-checker approvals", () => {
       .send({ decision: "APPROVED" })
       .expect(200);
     const headers = {
-      "X-Service-Token": serviceToken,
-      "X-Service-Name": "parc-payment",
+      Authorization: `Bearer ${serviceToken}`,
+      "X-Calling-Service": "parc-payment",
       "X-Tenant-Id": tenantId,
     };
     await request(app())
@@ -261,8 +269,8 @@ describeDatabase("bound maker-checker approvals", () => {
       .send({ decision: "APPROVED" })
       .expect(200);
     const headers = {
-      "X-Service-Token": serviceToken,
-      "X-Service-Name": "parc-payment",
+      Authorization: `Bearer ${serviceToken}`,
+      "X-Calling-Service": "parc-payment",
       "X-Tenant-Id": tenantId,
     };
     await request(app())

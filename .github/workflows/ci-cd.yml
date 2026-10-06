@@ -12,7 +12,7 @@ env:
   CONTAINER_NAME: parc-tenant-admin
 
 jobs:
-  # 1. TEST JOB (Your existing validation setup)
+  # 1. TEST JOB
   validate:
     runs-on: ubuntu-latest
     services:
@@ -91,12 +91,16 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-    # 3. DEPLOY JOB (Runs via SSH after build completes successfully)
+  # 3. DEPLOY JOB (Runs via SSH after build completes successfully)
+  # Runtime secrets come from /opt/parc/parc-tenant-admin/.env on the server, not GitHub secrets.
   deploy:
     needs: build-and-push
-    if: always() && needs.build-and-push.result == 'success'
+    if: always() && needs.build-and-push.result == 'success' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production # requires manual approval if the "production" environment has protection rules configured
+    concurrency:
+      group: deploy-parc-tenant-admin
+      cancel-in-progress: false
     permissions:
       contents: read
     steps:
@@ -104,33 +108,85 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           SHORT_SHA: ${{ needs.build-and-push.outputs.short_sha }}
-          DEPLOY_ACTOR: ${{ github.actor }}
-          VPS_GHCR_TOKEN: ${{ secrets.PARC_VPS_GHCR_PULL }}
-          DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
-          INTERNAL_SERVICE_TOKEN: ${{ secrets.PROD_INTERNAL_SERVICE_TOKEN }}
-          AUTH_JWT_ISSUER: ${{ secrets.PROD_AUTH_JWT_ISSUER }}
-          AUTH_JWT_PUBLIC_KEYS_JSON: ${{ secrets.PROD_AUTH_JWT_PUBLIC_KEYS_JSON }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           port: ${{ secrets.SERVER_PORT }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: REGISTRY,IMAGE_NAME,CONTAINER_NAME,SHORT_SHA,DEPLOY_ACTOR,VPS_GHCR_TOKEN,DATABASE_URL,INTERNAL_SERVICE_TOKEN,AUTH_JWT_ISSUER,AUTH_JWT_PUBLIC_KEYS_JSON
+          envs: REGISTRY,IMAGE_NAME,CONTAINER_NAME,SHORT_SHA
           script: |
             set -euo pipefail
 
-            export NODE_ENV=production HOST=0.0.0.0 PORT=3002 SERVICE_NAME=parc-tenant-admin AUTH_JWT_AUDIENCE=tenant-admin
-            TARGET_TAG="$SHORT_SHA"
-            export SERVICE_VERSION="$TARGET_TAG"
+            # Non-secret service identity; these override the same keys if they also appear in the env file.
+            export NODE_ENV=production HOST=0.0.0.0 SERVICE_NAME=parc-tenant-admin PORT=3002
             # Image references must be lowercase; metadata-action lowercased the pushed name.
             IMAGE_NAME=$(printf '%s' "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
-            IMAGE_URI="${REGISTRY}/${IMAGE_NAME}:${TARGET_TAG}"
-            STATE_DIR="$HOME/parc/${CONTAINER_NAME}"
-            mkdir -p "$STATE_DIR"
+            # Per-service server state: .env plus current/previous image tags for rollback.
+            STATE_ROOT=/opt/parc
+            STATE_DIR="$STATE_ROOT/${CONTAINER_NAME}"
+            # Secrets and environment-specific settings live only on the server, never in GitHub.
+            ENV_FILE="$STATE_DIR/.env"
+            if ! mkdir -p "$STATE_DIR" 2>/dev/null; then
+              echo "Cannot create $STATE_DIR. Prepare the server once: sudo mkdir -p $STATE_ROOT && sudo chown $(id -un):$(id -gn) $STATE_ROOT" >&2
+              exit 1
+            fi
+            chmod 700 "$STATE_DIR"
 
-            # Authenticate the VPS using the Personal Access Token (PAT)
-            echo "$VPS_GHCR_TOKEN" | docker login "$REGISTRY" -u "$DEPLOY_ACTOR" --password-stdin
+            if [ ! -f "$ENV_FILE" ]; then
+              LEGACY_DIR="$HOME/parc/${CONTAINER_NAME}"
+              if [ -f "$LEGACY_DIR/.env" ]; then
+                echo "Missing $ENV_FILE, but $LEGACY_DIR/.env exists from the previous layout. Copy it once: cp -a $LEGACY_DIR/. $STATE_DIR/" >&2
+              else
+                echo "Missing $ENV_FILE on the server; create it from the repository's .env.example first." >&2
+              fi
+              exit 1
+            fi
+            chmod 600 "$ENV_FILE"
 
+            # Last assignment wins, matching docker --env-file.
+            env_value() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -n 1; }
+
+            for key in DATABASE_URL IDEMPOTENCY_HASH_SECRET AUTH_JWT_ISSUER AUTH_JWT_PUBLIC_KEYS_JSON; do
+              if [ -z "$(env_value "$key")" ]; then
+                echo "$ENV_FILE must set $key." >&2
+                exit 1
+              fi
+            done
+
+            stop_service() {
+              docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+              docker rm "$CONTAINER_NAME" >/dev/null 2>&1 || true
+            }
+
+            start_service() {
+              # The image tag (sha-xxxxxxx) is the running version, including after a rollback.
+              export SERVICE_VERSION="${1##*:}"
+              docker run -d \
+                --name "$CONTAINER_NAME" \
+                --restart always \
+                --network host \
+                --env-file "$ENV_FILE" \
+                -e NODE_ENV -e HOST -e PORT -e SERVICE_NAME -e SERVICE_VERSION \
+                "$1"
+            }
+
+            service_ready() {
+              curl --fail --silent --max-time 2 "http://127.0.0.1:${PORT}/ready" >/dev/null
+            }
+
+            wait_until_ready() {
+              # Give crash-looping containers time to show up as restarts before the first probe.
+              sleep 5
+              for _ in $(seq 1 20); do
+                service_ready && return 0
+                sleep 3
+              done
+              return 1
+            }
+
+            IMAGE_URI="${REGISTRY}/${IMAGE_NAME}:${SHORT_SHA}"
+
+            # The server keeps its own GHCR login (docker login ghcr.io, run once on the host).
             echo "Pulling immutable deployment unit: $IMAGE_URI"
             docker pull "$IMAGE_URI"
 
@@ -140,8 +196,12 @@ jobs:
             fi
 
             # --- STEP 1: RUN DATABASE MIGRATIONS (forward-only; never reverted on rollback) ---
+            # MIGRATION_DATABASE_URL lets migrations use a DDL-owning login while the
+            # application keeps its least-privilege DATABASE_URL; it falls back to DATABASE_URL.
+            MIGRATION_DATABASE_URL=$(env_value MIGRATION_DATABASE_URL)
+            [ -n "$MIGRATION_DATABASE_URL" ] || MIGRATION_DATABASE_URL=$(env_value DATABASE_URL)
             echo "Running production database migrations..."
-            docker run --rm \
+            DATABASE_URL="$MIGRATION_DATABASE_URL" docker run --rm \
               --name "${CONTAINER_NAME}-migration" \
               --network host \
               -e NODE_ENV \
@@ -150,63 +210,22 @@ jobs:
               yarn migrate:runtime
 
             # --- STEP 2: SWAP APPLICATION CONTAINERS ---
-            echo "Stopping old application container..."
-            docker stop "$CONTAINER_NAME" || true
-            docker rm "$CONTAINER_NAME" || true
+            echo "Replacing application containers..."
+            stop_service
+            start_service "$IMAGE_URI"
 
-            echo "Starting new application container..."
-            # Run the container attached to the host network namespace
-            docker run -d \
-              --name "$CONTAINER_NAME" \
-              --restart always \
-              --network host \
-              -e NODE_ENV \
-              -e HOST \
-              -e PORT \
-              -e SERVICE_NAME \
-              -e SERVICE_VERSION \
-              -e DATABASE_URL \
-              -e INTERNAL_SERVICE_TOKEN \
-              -e AUTH_JWT_ISSUER \
-              -e AUTH_JWT_AUDIENCE \
-              -e AUTH_JWT_PUBLIC_KEYS_JSON \
-              "$IMAGE_URI"
-
-            # --- STEP 3: HEALTH-CHECK THE NEW CONTAINER, AUTO-ROLLBACK ON FAILURE ---
-            echo "Waiting for the new container to report ready..."
-            ready=false
-            for i in $(seq 1 20); do
-              if curl --fail --silent --max-time 2 "http://127.0.0.1:3002/ready" >/dev/null; then
-                ready=true
-                break
-              fi
-              sleep 3
-            done
-
-            if [ "$ready" = true ]; then
+            # --- STEP 3: HEALTH-CHECK THE NEW CONTAINERS, AUTO-ROLLBACK ON FAILURE ---
+            echo "Waiting for the new containers to report ready..."
+            if wait_until_ready; then
               echo "$IMAGE_URI" > "$STATE_DIR/current_image.txt"
               echo "Deploy succeeded: $IMAGE_URI"
               docker image prune -af --filter "until=72h"
             else
-              echo "New container failed readiness checks; rolling back." >&2
-              docker stop "$CONTAINER_NAME" || true
-              docker rm "$CONTAINER_NAME" || true
+              echo "New containers failed readiness checks; rolling back." >&2
+              docker logs --tail 50 "$CONTAINER_NAME" >&2 || true
+              stop_service
               if [ -f "$STATE_DIR/previous_image.txt" ]; then
-                PREVIOUS_IMAGE=$(cat "$STATE_DIR/previous_image.txt")
-                docker run -d \
-                  --name "$CONTAINER_NAME" \
-                  --restart always \
-                  --network host \
-                  -e NODE_ENV \
-                  -e HOST \
-                  -e PORT \
-                  -e SERVICE_NAME \
-                  -e DATABASE_URL \
-                  -e INTERNAL_SERVICE_TOKEN \
-                  -e AUTH_JWT_ISSUER \
-                  -e AUTH_JWT_AUDIENCE \
-                  -e AUTH_JWT_PUBLIC_KEYS_JSON \
-                  "$PREVIOUS_IMAGE"
+                start_service "$(cat "$STATE_DIR/previous_image.txt")"
               fi
               exit 1
             fi

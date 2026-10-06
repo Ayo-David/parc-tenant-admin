@@ -20,13 +20,18 @@ const schema = z
     ...databaseSchema.shape,
     DATABASE_POOL_MIN: z.coerce.number().int().min(0).default(0),
     DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
-    INTERNAL_SERVICE_TOKEN: z
+    /**
+     * Keys administrator-credential idempotency fingerprints. Set it to the
+     * former INTERNAL_SERVICE_TOKEN value to keep in-flight replays stable.
+     */
+    IDEMPOTENCY_HASH_SECRET: z
       .string()
       .min(32)
-      .default("development-service-token-change-me"),
+      .default("development-idempotency-secret-change-me"),
     AUTH_JWT_ISSUER: z.string().url().default("https://auth.parc.invalid"),
-    AUTH_JWT_AUDIENCE: z.string().min(1).default("tenant-admin"),
+    /** Auth verification keys: static SPKI keys by kid, or the JWKS URL. */
     AUTH_JWT_PUBLIC_KEYS_JSON: z.string().min(2).optional(),
+    AUTH_JWKS_URL: z.string().url().optional(),
     AUTHORIZATION_CACHE_TTL_SECONDS: z.coerce
       .number()
       .int()
@@ -47,15 +52,19 @@ const schema = z
     { message: "DATABASE_POOL_MIN must not exceed DATABASE_POOL_MAX" },
   )
   .refine(
-    ({ NODE_ENV, INTERNAL_SERVICE_TOKEN }) =>
+    ({ NODE_ENV, IDEMPOTENCY_HASH_SECRET }) =>
       NODE_ENV !== "production" ||
-      INTERNAL_SERVICE_TOKEN !== "development-service-token-change-me",
-    { message: "Production requires INTERNAL_SERVICE_TOKEN" },
+      IDEMPOTENCY_HASH_SECRET !== "development-idempotency-secret-change-me",
+    { message: "Production requires IDEMPOTENCY_HASH_SECRET" },
   )
   .refine(
-    ({ NODE_ENV, AUTH_JWT_PUBLIC_KEYS_JSON }) =>
-      NODE_ENV !== "production" || AUTH_JWT_PUBLIC_KEYS_JSON !== undefined,
-    { message: "Production requires AUTH_JWT_PUBLIC_KEYS_JSON" },
+    ({ NODE_ENV, AUTH_JWT_PUBLIC_KEYS_JSON, AUTH_JWKS_URL }) =>
+      NODE_ENV !== "production" ||
+      AUTH_JWT_PUBLIC_KEYS_JSON !== undefined ||
+      AUTH_JWKS_URL !== undefined,
+    {
+      message: "Production requires AUTH_JWT_PUBLIC_KEYS_JSON or AUTH_JWKS_URL",
+    },
   );
 
 export type AppConfig = z.infer<typeof schema>;

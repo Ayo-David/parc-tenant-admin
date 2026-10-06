@@ -25,10 +25,26 @@ Auth & Customer public keys are not configured.
 
 T-03 implements service-authenticated administrator credential verification,
 authorization lookup, platform/tenant MFA-policy lookup, Argon2id verification,
-lockout tracking, and independent RS256 authorization for privileged routes. Set
-the same `INTERNAL_SERVICE_TOKEN` in Auth & Customer and configure Auth's public
-keys through `AUTH_JWT_PUBLIC_KEYS_JSON`. Auth administrator tokens include both
-`admin-bff` and `tenant-admin` audiences.
+and lockout tracking. Configure Auth's verification keys through
+`AUTH_JWT_PUBLIC_KEYS_JSON` (or `AUTH_JWKS_URL`).
+
+Every call to Tenant Admin carries a short-lived Auth-issued bearer token for
+the `parc-tenant-admin` audience. No shared internal secret is accepted.
+
+- `/internal/v1` routes pass through the shared `parc-service-auth` middleware.
+  `src/http/service-access.ts` declares which caller, token kind and scope each
+  route accepts. Platform-level, tenantless tokens are accepted only for
+  platform scopes such as administrator verification and pre-login mobile
+  bootstrap.
+- Administrator console routes accept delegated tokens exchanged by the Admin
+  BFF with scope `tenant.administration`. Tenant Admin re-reads the
+  administrator's status and fine-grained permission live on every request.
+- `GET /internal/v1/tenants/{id}/status` serves Auth's tenant check before
+  token issuance.
+
+`IDEMPOTENCY_HASH_SECRET` keys administrator-credential idempotency
+fingerprints. During migration, set it to the previous `INTERNAL_SERVICE_TOKEN`
+value so that in-flight replays still match.
 
 Database logins must be granted exactly one appropriate `NOLOGIN` group role:
 `parc_tenant_admin_runtime`, `parc_tenant_admin_platform`,

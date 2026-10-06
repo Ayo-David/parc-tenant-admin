@@ -1,8 +1,11 @@
-import { timingSafeEqual } from "node:crypto";
 import { Router, type Request } from "express";
 import { z } from "zod";
 import type { CustomerSupportService } from "../services/customer-support-service.js";
 import { ApiError } from "./api-error.js";
+import {
+  requireServiceAccess,
+  tenantAdminAccessPolicies,
+} from "./service-access.js";
 
 const identifiers = z.object({ customerId: z.string().uuid() });
 const ticket = z.object({
@@ -13,7 +16,6 @@ const ticket = z.object({
 
 export function createCustomerSupportRouter(input: {
   service: CustomerSupportService;
-  serviceToken: string;
   allowedServices: ReadonlySet<string>;
 }): Router {
   const router = Router();
@@ -90,20 +92,18 @@ function tenant(request: Request): string {
 function invalid(): ApiError {
   return new ApiError(422, "INVALID_REQUEST", "Request is invalid");
 }
+/** Customer delegation only, for that customer's own support data. */
 function authenticate(
   request: Request,
-  input: { serviceToken: string; allowedServices: ReadonlySet<string> },
+  input: { allowedServices: ReadonlySet<string> },
 ): void {
-  const token = request.header("x-internal-service-token") ?? "";
-  const caller = request.header("x-calling-service") ?? "";
-  if (
-    !input.allowedServices.has(caller) ||
-    Buffer.byteLength(token) !== Buffer.byteLength(input.serviceToken) ||
-    !timingSafeEqual(Buffer.from(token), Buffer.from(input.serviceToken))
-  )
-    throw new ApiError(
-      401,
-      "UNAUTHORIZED_SERVICE",
-      "Valid internal service authentication is required",
-    );
+  const principal = requireServiceAccess(
+    request,
+    request.method === "GET"
+      ? tenantAdminAccessPolicies.customerSupportRead
+      : tenantAdminAccessPolicies.customerSupportWrite,
+    input.allowedServices,
+  );
+  if (principal.subject?.id !== request.params.customerId)
+    throw new ApiError(403, "SUBJECT_MISMATCH", "Customer mismatch");
 }
