@@ -1,9 +1,13 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { Router, type Request } from "express";
 import { z } from "zod";
 import type { AdministratorAuthorizer } from "../auth/platform-authorizer.js";
 import type { ProviderSelectionService } from "../services/provider-selection-service.js";
 import { ApiError } from "./api-error.js";
+import {
+  requireServiceAccess,
+  tenantAdminAccessPolicies,
+} from "./service-access.js";
 
 const uuid = z.string().uuid();
 const capability = z.enum([
@@ -33,7 +37,6 @@ const selection = z
 export function createProviderSelectionRouter(input: {
   service: ProviderSelectionService;
   authorizer: AdministratorAuthorizer;
-  serviceToken: string;
   allowedServices: ReadonlySet<string>;
 }): Router {
   const router = Router();
@@ -214,21 +217,13 @@ function correlation(request: Request): string {
 }
 function authenticateService(
   request: Request,
-  input: { serviceToken: string; allowedServices: ReadonlySet<string> },
+  input: { allowedServices: ReadonlySet<string> },
 ): void {
-  const supplied = request.header("X-Service-Token") ?? "";
-  if (
-    supplied.length !== input.serviceToken.length ||
-    !timingSafeEqual(Buffer.from(supplied), Buffer.from(input.serviceToken))
-  )
-    throw new ApiError(401, "UNAUTHORIZED", "Service authentication failed");
-  const service = request.header("X-Service-Name");
-  if (service === undefined || !input.allowedServices.has(service))
-    throw new ApiError(
-      403,
-      "SERVICE_NOT_ALLOWED",
-      "Calling service is not approved",
-    );
+  requireServiceAccess(
+    request,
+    tenantAdminAccessPolicies.providerSelection,
+    input.allowedServices,
+  );
 }
 function normalize(error: unknown): unknown {
   if (error instanceof z.ZodError)

@@ -28,56 +28,54 @@ import { createOnboardingReferenceDataRouter } from "./http/onboarding-reference
 import type { OnboardingReferenceDataService } from "./services/onboarding-reference-data-service.js";
 import { createConsentDocumentRouter } from "./http/consent-document-router.js";
 import type { ConsentDocumentService } from "./services/consent-document-service.js";
+import type { Knex } from "knex";
+import type { ParcAuth } from "./security/parc-service-auth.js";
+import { createTenantStatusRouter } from "./http/tenant-status-router.js";
 
 export function createApp(input: {
   config: AppConfig;
   logger: Logger;
   readinessChecks?: readonly ReadinessCheck[];
+  /** Validates Auth-issued bearer tokens on every `/internal/v1` route. */
+  serviceAuth?: ParcAuth;
+  database?: Knex;
   tenantLifecycle?: {
     service: TenantLifecycleService;
     authorizer: PlatformAuthorizer;
   };
   administratorIdentity?: {
     service: AdministratorIdentityService;
-    serviceToken: string;
   };
   approvals?: {
     service: ApprovalService;
     authorizer: AdministratorAuthorizer;
-    serviceToken: string;
     allowedServices: ReadonlySet<string>;
   };
   providerSelection?: {
     service: ProviderSelectionService;
     authorizer: AdministratorAuthorizer;
-    serviceToken: string;
     allowedServices: ReadonlySet<string>;
   };
   configuration?: {
     service: ConfigurationService;
     authorizer: AdministratorAuthorizer;
-    serviceToken: string;
     allowedServices: ReadonlySet<string>;
   };
   mobileBootstrap?: {
     service: MobileBootstrapService;
-    serviceToken: string;
     allowedServices: ReadonlySet<string>;
   };
   customerSupport?: {
     service: CustomerSupportService;
-    serviceToken: string;
     allowedServices: ReadonlySet<string>;
   };
   onboardingReferenceData?: {
     service: OnboardingReferenceDataService;
-    serviceToken: string;
     allowedServices: ReadonlySet<string>;
   };
   consentDocuments?: {
     service: ConsentDocumentService;
     authorizer: AdministratorAuthorizer;
-    serviceToken: string;
     allowedServices: ReadonlySet<string>;
   };
 }): Express {
@@ -113,6 +111,18 @@ export function createApp(input: {
       ...result,
     });
   });
+  app.use(
+    "/internal/v1",
+    input.serviceAuth?.authenticate() ??
+      ((_request, response) => {
+        response.status(401).json({
+          code: "UNAUTHORIZED",
+          message: "Service authentication is not configured",
+        });
+      }),
+  );
+  if (input.database !== undefined)
+    app.use(createTenantStatusRouter(input.database));
   if (input.tenantLifecycle !== undefined)
     app.use(createTenantLifecycleRouter(input.tenantLifecycle));
   if (input.administratorIdentity !== undefined)

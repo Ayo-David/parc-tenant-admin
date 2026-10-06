@@ -1,9 +1,13 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { Router, type Request } from "express";
 import { z } from "zod";
 import type { AdministratorAuthorizer } from "../auth/platform-authorizer.js";
 import type { ConsentDocumentService } from "../services/consent-document-service.js";
 import { ApiError } from "./api-error.js";
+import {
+  requireServiceAccess,
+  tenantAdminAccessPolicies,
+} from "./service-access.js";
 
 const uuid = z.string().uuid();
 const consentType = z.enum([
@@ -21,7 +25,6 @@ const consentType = z.enum([
 export function createConsentDocumentRouter(input: {
   service: ConsentDocumentService;
   authorizer: AdministratorAuthorizer;
-  serviceToken: string;
   allowedServices: ReadonlySet<string>;
 }): Router {
   const router = Router();
@@ -156,20 +159,13 @@ function requiredHeader(req: Request, name: string): string {
 }
 function serviceAuth(
   req: Request,
-  input: { serviceToken: string; allowedServices: ReadonlySet<string> },
+  input: { allowedServices: ReadonlySet<string> },
 ): void {
-  const supplied = req.header("x-internal-service-token") ?? "";
-  const service = req.header("x-calling-service") ?? "";
-  if (
-    !input.allowedServices.has(service) ||
-    Buffer.byteLength(supplied) !== Buffer.byteLength(input.serviceToken) ||
-    !timingSafeEqual(Buffer.from(supplied), Buffer.from(input.serviceToken))
-  )
-    throw new ApiError(
-      401,
-      "UNAUTHORIZED_SERVICE",
-      "Valid internal service authentication is required",
-    );
+  requireServiceAccess(
+    req,
+    tenantAdminAccessPolicies.consentValidation,
+    input.allowedServices,
+  );
 }
 function normalize(error: unknown): ApiError {
   if (error instanceof ApiError) return error;

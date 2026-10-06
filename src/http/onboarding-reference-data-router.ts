@@ -1,12 +1,14 @@
-import { timingSafeEqual } from "node:crypto";
 import { Router, type Request } from "express";
 import { z } from "zod";
 import { ApiError } from "./api-error.js";
+import {
+  requireServiceAccess,
+  tenantAdminAccessPolicies,
+} from "./service-access.js";
 import type { OnboardingReferenceDataService } from "../services/onboarding-reference-data-service.js";
 
 export function createOnboardingReferenceDataRouter(input: {
   service: OnboardingReferenceDataService;
-  serviceToken: string;
   allowedServices: ReadonlySet<string>;
 }): Router {
   const router = Router();
@@ -32,18 +34,11 @@ export function createOnboardingReferenceDataRouter(input: {
 }
 function authenticate(
   request: Request,
-  input: { serviceToken: string; allowedServices: ReadonlySet<string> },
+  input: { allowedServices: ReadonlySet<string> },
 ): void {
-  const token = request.header("x-internal-service-token") ?? "";
-  const caller = request.header("x-calling-service") ?? "";
-  if (
-    !input.allowedServices.has(caller) ||
-    Buffer.byteLength(token) !== Buffer.byteLength(input.serviceToken) ||
-    !timingSafeEqual(Buffer.from(token), Buffer.from(input.serviceToken))
-  )
-    throw new ApiError(
-      401,
-      "UNAUTHORIZED_SERVICE",
-      "Valid internal service authentication is required",
-    );
+  requireServiceAccess(
+    request,
+    tenantAdminAccessPolicies.onboardingReference,
+    input.allowedServices,
+  );
 }

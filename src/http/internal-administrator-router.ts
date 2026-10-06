@@ -1,8 +1,11 @@
-import { timingSafeEqual } from "node:crypto";
 import { Router, type Request, type RequestHandler } from "express";
 import { z } from "zod";
 import type { AdministratorIdentityService } from "../services/administrator-identity-service.js";
 import { ApiError } from "./api-error.js";
+import {
+  requireServiceAccess,
+  tenantAdminAccessPolicies,
+} from "./service-access.js";
 
 const uuid = z.string().uuid();
 const credentialSchema = z
@@ -15,12 +18,11 @@ const credentialSchema = z
 
 export function createInternalAdministratorRouter(input: {
   service: AdministratorIdentityService;
-  serviceToken: string;
 }): Router {
   const router = Router();
   const authenticateService: RequestHandler = (request, _response, next) => {
     try {
-      requireServiceToken(request, input.serviceToken);
+      requireServiceAccess(request, tenantAdminAccessPolicies.administrators);
       next();
     } catch (error) {
       next(error);
@@ -95,20 +97,6 @@ export function createInternalAdministratorRouter(input: {
     },
   );
   return router;
-}
-
-function requireServiceToken(request: Request, expected: string): void {
-  const authorization = request.header("Authorization");
-  const supplied = authorization?.startsWith("Bearer ")
-    ? authorization.slice(7)
-    : "";
-  const suppliedBytes = Buffer.from(supplied);
-  const expectedBytes = Buffer.from(expected);
-  if (
-    suppliedBytes.length !== expectedBytes.length ||
-    !timingSafeEqual(suppliedBytes, expectedBytes)
-  )
-    throw new ApiError(401, "UNAUTHORIZED", "Service authentication failed");
 }
 
 function requiredIdempotencyKey(request: Request): string {
