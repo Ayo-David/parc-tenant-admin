@@ -38,7 +38,37 @@ const schema = z
       .min(1)
       .max(60)
       .default(30),
+    /** Standalone Redis; ignored when REDIS_SENTINELS is set. */
     REDIS_URL: z.string().url().optional(),
+    /**
+     * Sentinel endpoints as `host[:port]`, comma separated. When set, the
+     * primary is discovered from Sentinel and rediscovered after failover.
+     */
+    REDIS_SENTINELS: z
+      .string()
+      .default("")
+      .transform((value) =>
+        value
+          .split(",")
+          .map((endpoint) => endpoint.trim())
+          .filter(Boolean)
+          .map((endpoint) => {
+            const [host = "", port = "6379"] = endpoint.split(":");
+            return { host, port: Number(port) };
+          }),
+      )
+      .pipe(
+        z.array(
+          z.object({
+            host: z.string().min(1),
+            port: z.number().int().min(1).max(65_535),
+          }),
+        ),
+      ),
+    REDIS_SENTINEL_MASTER_NAME: z.string().min(1).default("mymaster"),
+    REDIS_SENTINEL_PASSWORD: z.string().min(1).optional(),
+    /** Password for the primary and replicas in Sentinel mode. */
+    REDIS_PASSWORD: z.string().min(1).optional(),
     APPROVAL_CONSUMER_SERVICES: z
       .string()
       .min(1)

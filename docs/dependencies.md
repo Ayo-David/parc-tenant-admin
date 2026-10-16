@@ -8,4 +8,6 @@
 T-03 uses Argon2id to verify administrator password hashes and JOSE to validate
 Auth & Customer RS256 access tokens. Redis is optional for authorization-version-
 keyed role-name caching; permissions and administrator status are always loaded
-from PostgreSQL for authorization decisions.
+from PostgreSQL for authorization decisions. The client is ioredis, connecting
+either to `REDIS_URL` or, when `REDIS_SENTINELS` is set, to the primary that
+Sentinel reports, following it across failover.
