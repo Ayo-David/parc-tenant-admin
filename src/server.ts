@@ -8,13 +8,14 @@ import {
   MemoryRoleMetadataCache,
   RedisRoleMetadataCache,
 } from "./auth/role-metadata-cache.js";
-import { createClient } from "redis";
 import { loadConfig } from "./config/env.js";
 import {
   checkDatabase,
   closeDatabase,
   createDatabase,
 } from "./database/client.js";
+import { createRedis, isRedisConfigured } from "./database/redis.js";
+import { checkRedisWritable } from "./health/redis.js";
 import { createLogger } from "./utils/logger.js";
 import { TenantLifecycleService } from "./services/tenant-lifecycle-service.js";
 import { AdministratorIdentityService } from "./services/administrator-identity-service.js";
@@ -29,12 +30,13 @@ import { ConsentDocumentService } from "./services/consent-document-service.js";
 const config = loadConfig();
 const logger = createLogger(config);
 const database = createDatabase(config);
-const redis =
-  config.REDIS_URL === undefined
-    ? undefined
-    : createClient({ url: config.REDIS_URL });
+const redis = isRedisConfigured(config) ? createRedis(config) : undefined;
 if (redis !== undefined) {
   redis.on("error", (error) => logger.error({ err: error }, "Redis error"));
+  redis.on("reconnecting", (delayMs: number) =>
+    logger.warn({ delayMs }, "Redis reconnecting"),
+  );
+  redis.on("ready", () => logger.info("Redis ready"));
   await redis.connect();
 }
 const roleCache =
@@ -96,7 +98,7 @@ const app = createApp({
     { name: "database", check: () => checkDatabase(database) },
     ...(redis === undefined
       ? []
-      : [{ name: "redis", check: async () => void (await redis.ping()) }]),
+      : [{ name: "redis", check: () => checkRedisWritable(redis) }]),
   ],
   tenantLifecycle: {
     service: new TenantLifecycleService(database),
@@ -171,8 +173,8 @@ function shutdown(signal: NodeJS.Signals): void {
       logger.error({ err: databaseError }, "Database close failed");
       process.exitCode = 1;
     });
-    if (redis !== undefined)
-      void redis.close().catch((redisError: unknown) => {
+    if (redis !== undefined && redis.status !== "end")
+      void redis.quit().catch((redisError: unknown) => {
         logger.error({ err: redisError }, "Redis close failed");
         process.exitCode = 1;
       });

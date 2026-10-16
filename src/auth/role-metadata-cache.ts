@@ -1,4 +1,4 @@
-import type { RedisClientType } from "redis";
+import type { Redis } from "ioredis";
 
 export interface RoleMetadataCache {
   get(
@@ -44,7 +44,7 @@ export class MemoryRoleMetadataCache implements RoleMetadataCache {
 
 export class RedisRoleMetadataCache implements RoleMetadataCache {
   public constructor(
-    private readonly redis: RedisClientType,
+    private readonly redis: Pick<Redis, "get" | "set">,
     private readonly ttlSeconds: number,
   ) {}
 
@@ -66,9 +66,8 @@ export class RedisRoleMetadataCache implements RoleMetadataCache {
     await this.redis.set(
       key(administratorId, authorizationVersion),
       JSON.stringify(roles),
-      {
-        expiration: { type: "EX", value: this.ttlSeconds },
-      },
+      "EX",
+      this.ttlSeconds,
     );
   }
 }
